@@ -152,10 +152,39 @@ private:
 
 public:
   static Metadata from_ptr(const char *ptr);
+  static Metadata empty();
   int size() const;
-  std::string to_string() const;
   std::string key_string() const { return key_.to_string(); }
   MetadataDType dtype() const { return val_type_; }
-  std::string value_string() const { return val_->to_string(); }
-  const MetadataValue *value() const { return val_.get(); }
+
+  std::string val_string() const;
+
+  template <typename T>
+  T value() const
+  {
+    if (const auto *prim = dynamic_cast<const MetadataPrimitiveValue *>(val_.get()))
+      return std::get<T>(prim->value());
+    return {};
+  }
+
+  template <typename T>
+  std::vector<T> val_array() const
+  {
+    std::vector<T> out;
+    if (const auto *arr = dynamic_cast<const MetadataArrayValue *>(val_.get()))
+    {
+      for (const auto &t : arr->elements())
+      {
+        if constexpr (std::is_same_v<T, std::string>)
+        {
+          out.push_back(t->to_string());
+        }
+        else if (const auto *prim = dynamic_cast<const MetadataPrimitiveValue *>(t.get()))
+        {
+          out.push_back(std::get<T>(prim->value()));
+        }
+      }
+    }
+    return out;
+  }
 };

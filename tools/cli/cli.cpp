@@ -1,7 +1,7 @@
 #include <iostream>
 #include <string>
 #include <memory>
-#include <zinferlm/model_loader.h>
+#include <zinferlm/models.h>
 #include <zinferlm/tokenizer.h>
 
 void print_usage(const char *prog_name)
@@ -34,6 +34,13 @@ int main(int argc, char *argv[])
     std::cout << "Version: " << m_info.version << std::endl;
     std::cout << "Architecture: " << m_info.architecture << std::endl;
     std::cout << "File Type: " << m_info.file_type << std::endl;
+
+    std::cout << "===========Tensor Info============" << std::endl;
+    std::vector<zinferlm::tensor_info_t> tinfo = zinferlm::Model::instance().tensor_info();
+    for (auto &t : tinfo)
+    {
+      std::cout << t.name << " " << t.type << " " << t.n_dim << " " << t.dimensions << std::endl;
+    }
   }
   else if (subcommand == "tokenize")
   {

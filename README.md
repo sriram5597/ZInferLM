@@ -29,7 +29,18 @@ ZInferLM is a foundational inference engine for large language models. It loads 
 │    access      │  │                       │
 │  • Metadata KV │  │                       │
 │  • Tensor index│  │                       │
-└───────────────┘  └───────────────────────┘
+└────────┬───────┘  └───────────────────────┘
+         │
+┌────────▼─────────────────────────────────┐
+│  ggml  (tensor computation engine)        │
+│  ggml/                                    │
+│                                           │
+│  • Tensor ops (mul_mat, rms_norm, rope…)  │
+│  • Quantized dequantization kernels       │
+│  • CPU backend (AVX2/AVX512/NEON)         │
+│  • Backend abstraction (CUDA/Metal-ready) │
+│  • Computation graph & graph allocator    │
+└──────────────────────────────────────────┘
 ```
 
 ---
@@ -37,39 +48,44 @@ ZInferLM is a foundational inference engine for large language models. It loads 
 ## Features
 
 ### Model Loading
+
 - **Zero-copy file access** via `mmap()` — model weights and metadata are referenced directly from mapped memory; no deserialization into heap buffers.
 - **Full GGUF v3 spec support** — parses magic, version, metadata key-value pairs, and tensor index entries using pointer-arithmetic over the mapped region.
 - **Heterogeneous metadata model** — C++20 `std::variant`–backed polymorphic value types (`uint8..uint64`, `int8..int64`, `float32/64`, `bool`, `string`, `array`) with exact byte accounting for sequential streaming parse.
 - **Complete tensor type enumeration** — all 40 GGML quantized and unquantized types catalogued, from legacy `Q4_0`/`Q4_1` through `K`-quants, `IQ` importance quants, `TQ` ternary quants, `BF16`, and `MXFP4`.
 
 ### Tokenizer
+
 - **GPT-2 BPE algorithm** — faithful implementation of the GPT-2 byte-pair encoding pipeline: regex pretokenization, byte-to-Unicode character remapping (identical to `bytes_to_unicode()`), iterative merge with rank-based greedy pair selection, and vocabulary ID mapping.
 - **PCRE2 with JIT compilation** — pretokenization regex patterns are compiled with PCRE2's JIT engine for native-speed matching, avoiding the overhead of interpreted regex at tokenization time.
 - **Configurable pretokenizer** — architecture-specific regex patterns (Qwen2, Llama) are pluggable via the `PRE_TOKENIZER_TYPE` enum and associated regex strings.
 
 ### Foundation for Inference
+
+- **ggml tensor backend** — [ggml](https://github.com/ggml-org/ggml) (vendored as a git submodule) provides the tensor computation engine: matrix multiplication, RMS norm, rotary embeddings, softmax, and 40+ quantized dequantization kernels. The CPU backend auto-detects ISA features (AVX2, AVX512, NEON) at build time via `-march=native`.
 - **Quantization-aware** — the tensor index captures the GGML type for every tensor in the file, enabling dispatch to quantized dequantization kernels at inference time.
-- **Static library target** — `libzinferlm.a` links directly into an inference engine, with no runtime dependency beyond PCRE2.
+- **Shared library target** — `libzinferlm.so` links ggml for tensor ops, with PCRE2 as the only additional runtime dependency.
 - **Singleton model access** — `Model::instance()` ensures a single loaded model at a time, with a factory-style `Model::load()` that auto-detects file format.
 
 ---
 
 ## Supported Quantization Formats
 
-| Category | Types |
-|---|---|
-| **Unquantized** | F32, F16, BF16, F64, I8, I16, I32, I64 |
-| **Legacy Q** | Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q8_1 |
-| **K-quants** | Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q8_K |
+| Category              | Types                                                                |
+| --------------------- | -------------------------------------------------------------------- |
+| **Unquantized**       | F32, F16, BF16, F64, I8, I16, I32, I64                               |
+| **Legacy Q**          | Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q8_1                                   |
+| **K-quants**          | Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q8_K                                   |
 | **Importance quants** | IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S, IQ3_XXS, IQ3_S, IQ4_NL, IQ4_XS |
-| **Ternary quants** | TQ1_0, TQ2_0 |
-| **Microscaling** | MXFP4 |
+| **Ternary quants**    | TQ1_0, TQ2_0                                                         |
+| **Microscaling**      | MXFP4                                                                |
 
 ---
 
 ## Quick Start
 
 ### Prerequisites
+
 - C++20 compiler (GCC 12+ or Clang 16+)
 - CMake ≥ 3.20
 - PCRE2 development library (`libpcre2-dev` on Debian/Ubuntu, `pcre2` on macOS)
@@ -78,11 +94,17 @@ ZInferLM is a foundational inference engine for large language models. It loads 
 ### Build
 
 ```bash
+git clone --recursive https://github.com/your-org/zinferlm.git
+cd zinferlm
+# If you already cloned without --recursive:
+git submodule update --init --recursive
+
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
 Artifacts:
+
 - `build/lib/libzinferlm.a` — static library
 - `build/bin/zinferlm-cli` — CLI tool
 
@@ -135,6 +157,7 @@ The `MetadataValue` class hierarchy (`PrimitiveValue`, `StringValue`, `ArrayValu
 ### RAII Resource Management
 
 All system resources are wrapped in `std::unique_ptr` with custom deleters:
+
 - File descriptors (`close`)
 - `mmap` regions (`munmap`)
 - PCRE2 compiled patterns (`pcre2_code_free`)
@@ -149,23 +172,24 @@ This guarantees cleanup on scope exit, including during exceptions, without expl
 ```
 inferlm/
 ├── include/zinferlm/          # Public API headers
-│   ├── model_loader.h         #   Model base class, info structs
+│   ├── models.h               #   Model base class, info structs
 │   └── tokenizer.h            #   Tokenizer class, token_t
 ├── src/
 │   ├── model_loader/
-│   │   ├── loader.cpp         #   File type detection, factory
+│   │   ├── loader.h           #   File type detection, factory
 │   │   ├── gguf/
 │   │   │   ├── gguf.cpp/h     #   GGUF binary parser (mmap, header, tensors)
 │   │   │   ├── metadata.cpp/h #   GGUF metadata KV parser
-│   │   │   └── tensors.cpp/h  #   Tensor info parser, GGMLType enum
+│   │   │   └── tensors.cpp/h  #   Tensor info parser (uses ggml types)
 │   │   └── models/
-│   │       └── gguf.cpp/h     #   GGUFModel adapter
+│   │       └── qwen.cpp/h     #   QwenModel adapter
 │   └── tokenizer/
 │       ├── tokenizer.cpp      #   BPE tokenizer implementation
 │       └── tokenizer.h        #   Pretokenizer regex patterns
+├── ggml/                      #   Vendored ggml tensor library (git submodule)
 ├── tools/cli/
 │   └── cli.cpp                #   CLI: inspect & tokenize subcommands
-├── models/                    #   Bundled test model
+├── model_files/               #   Bundled test models (git-ignored)
 ├── CMakeLists.txt             #   Top-level build
 ├── LICENSE                    #   Apache 2.0
 └── README.md

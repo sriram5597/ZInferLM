@@ -1,10 +1,10 @@
-add_library(zinferlm ../include/zinferlm/model_loader.h ../include/zinferlm/tokenizer.h
-    ./model_loader/loader.cpp 
+add_library(zinferlm ../include/zinferlm/models.h ../include/zinferlm/tokenizer.h
+    ./models.cpp
     ./model_loader/gguf/gguf.h ./model_loader/gguf/gguf.cpp 
-    ./model_loader/models/gguf.h ./model_loader/models/gguf.cpp 
     ./model_loader/gguf/metadata.cpp ./model_loader/gguf/metadata.h
     ./model_loader/gguf/tensors.cpp ./model_loader/gguf/tensors.h
     ./tokenizer/tokenizer.cpp ./tokenizer/tokenizer.h
+    ./models/qwen.cpp ./models/qwen.h
 )
 
 find_package(PkgConfig REQUIRED)
@@ -25,7 +25,7 @@ if (NOT PCRE2_FOUND)
                         "  Windows:      vcpkg install pcre2")
 endif()
 
-target_link_libraries(zinferlm PRIVATE ${PCRE2_LIBRARIES})
+target_link_libraries(zinferlm PRIVATE ${PCRE2_LIBRARIES} ggml)
 
-target_include_directories(zinferlm PRIVATE . ${PCRE2_INCLUDE_DIRS})
+target_include_directories(zinferlm PRIVATE . ${PCRE2_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/ggml/include)
 target_include_directories(zinferlm PUBLIC ../include)

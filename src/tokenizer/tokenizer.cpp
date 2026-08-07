@@ -9,7 +9,7 @@
 #include <pcre2.h>
 
 #include <zinferlm/tokenizer.h>
-#include <zinferlm/model_loader.h>
+#include <zinferlm/models.h>
 #include "tokenizer.h"
 
 std::string get_pretokenizer_regex(std::string model)
@@ -17,6 +17,10 @@ std::string get_pretokenizer_regex(std::string model)
     if (model == "qwen2")
     {
         return PRE_TOKENIZER_QWEN2_REGEX;
+    }
+    if (model == "llama-bpe")
+    {
+        return PRE_TOKENIZER_LLAMA_REGEX;
     }
     return "";
 }

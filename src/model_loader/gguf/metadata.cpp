@@ -178,12 +178,21 @@ Metadata Metadata::from_ptr(const char *ptr)
     return Metadata(key, val_type, std::move(val));
 }
 
-std::string Metadata::to_string() const
-{
-    return std::format("Key: {}, Value: {}", key_.to_string(), val_->to_string());
-}
-
 int Metadata::size() const
 {
     return key_.size() + sizeof(val_type_) + val_->size();
+}
+
+std::string Metadata::val_string() const
+{
+    return val_->to_string();
+}
+
+Metadata Metadata::empty()
+{
+    static const uint64_t zero = 0;
+    return Metadata{
+        MetadataStringValue{std::string_view{""}, &zero},
+        GGUF_METADATA_VALUE_TYPE_UINT8,
+        std::make_unique<MetadataPrimitiveValue>(primitive_value_t{uint8_t{0}}, sizeof(uint8_t))};
 }

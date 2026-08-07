@@ -21,7 +21,7 @@ TensorInfo TensorInfo::from_ptr(const char *ptr)
         cur += sizeof(*e);
     }
 
-    const GGMLType *type = reinterpret_cast<const GGMLType *>(cur);
+    const ggml_type *type = reinterpret_cast<const ggml_type *>(cur);
     cur += sizeof(*type);
     const uint64_t *offset = reinterpret_cast<const uint64_t *>(cur);
     cur += sizeof(*offset);
@@ -35,7 +35,7 @@ int TensorInfo::size() const
     return name_->size() + sizeof(*n_dimensions_) + sizeof(uint64_t) * dimensions_.size() + sizeof(*ggml_type_) + sizeof(uint64_t);
 }
 
-GGMLType TensorInfo::type() const
+ggml_type TensorInfo::type() const
 {
     return *ggml_type_;
 }
@@ -47,6 +47,11 @@ std::string TensorInfo::name_string() const
 std::string TensorInfo::n_dim_sting() const
 {
     return std::format("{}", *n_dimensions_);
+}
+
+std::string TensorInfo::type_string() const
+{
+    return std::string(ggml_type_name(*ggml_type_));
 }
 
 std::string TensorInfo::dims_string() const

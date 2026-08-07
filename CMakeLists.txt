@@ -13,6 +13,11 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 option(BUILD_CLI "Build ZInferLM CLI" ${BUILD_ALL})
 
+set(GGML_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GGML_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+
+add_subdirectory(ggml)
+
 add_subdirectory(src)
 
 if(BUILD_CLI)

@@ -4,8 +4,10 @@
 #include <functional>
 #include <variant>
 #include <vector>
-#include <map>
+#include <unordered_map>
 #include <string_view>
+#include <zinferlm/models.h>
+#include "model_loader/loader.h"
 #include "metadata.h"
 #include "tensors.h"
 
@@ -95,14 +97,18 @@ struct gguf_header_t
   uint64_t metadata_kv_count;
 };
 
-class GGUFFile
+using metadata_map_t = std::unordered_map<std::string, std::unique_ptr<Metadata>>;
+
+class GGUFLoader : public ModelLoader
 {
 public:
   const gguf_header_t *header;
-  std::map<std::string, std::unique_ptr<Metadata>> metadata;
+  metadata_map_t metadata;
   std::vector<std::unique_ptr<TensorInfo>> tensors;
-
-  void print();
+  Metadata *get_metadata(std::string key) const;
+  zinferlm::model_info_t info() const override;
+  zinferlm::tokenizer_info_t tokenizer_info() const override;
+  std::vector<zinferlm::tensor_info_t> tensor_info() const override;
 
   void set_mapped_memory(std::unique_ptr<const char, std::function<void(const char *)>> mem)
   {
@@ -111,7 +117,8 @@ public:
 
 private:
   std::unique_ptr<const char, std::function<void(const char *)>> mapped_memory_;
+  mutable Metadata default_metadata_ = Metadata::empty();
 };
 
 bool is_gguf_file(int *);
-std::unique_ptr<GGUFFile> load_gguf_file(int *, size_t);
+std::unique_ptr<GGUFLoader> load_gguf_file(int *, size_t);
