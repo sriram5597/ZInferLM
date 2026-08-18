@@ -109,14 +109,19 @@ public:
   zinferlm::model_info_t info() const override;
   zinferlm::tokenizer_info_t tokenizer_info() const override;
   std::vector<zinferlm::tensor_info_t> tensor_info() const override;
+  uint64_t get_tensor_count() const override;
+  void *get_tensor_ptr(uint64_t offset) const override;
 
+  void set_tensor_base_ptr(const char *ptr);
   void set_mapped_memory(std::unique_ptr<const char, std::function<void(const char *)>> mem)
   {
     mapped_memory_ = std::move(mem);
   }
 
 private:
+  void *tensor_base_ptr_;
   std::unique_ptr<const char, std::function<void(const char *)>> mapped_memory_;
+  uint64_t align_address(uint64_t ptr) const;
   mutable Metadata default_metadata_ = Metadata::empty();
 };
 

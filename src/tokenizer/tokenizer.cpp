@@ -185,7 +185,7 @@ std::vector<std::string> zinferlm::Tokenizer::split_and_merge_(std::string chunk
     return tokens;
 }
 
-std::vector<zinferlm::token_t> zinferlm::Tokenizer::tokenize(std::string text)
+std::vector<std::pair<std::string, uint64_t>> zinferlm::Tokenizer::tokenize(std::string text)
 {
     std::vector<std::string> final_tokens;
     std::vector<std::string> chunks = pretokenize(text);
@@ -194,12 +194,10 @@ std::vector<zinferlm::token_t> zinferlm::Tokenizer::tokenize(std::string text)
         std::vector<std::string> tokens = split_and_merge_(c);
         final_tokens.insert(final_tokens.end(), tokens.begin(), tokens.end());
     }
-    std::vector<zinferlm::token_t> token_list;
+    std::vector<std::pair<std::string, uint64_t>> token_list;
     for (auto t : final_tokens)
     {
-        token_list.push_back(zinferlm::token_t{
-            .token = t,
-            .token_id = token_to_id_map_[t]});
+        token_list.push_back(std::make_pair(t, token_to_id_map_[t]));
     }
     return token_list;
 }

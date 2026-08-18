@@ -1,5 +1,4 @@
 #include <iostream>
-#include <string>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -8,7 +7,7 @@
 #include <ggml.h>
 #include <zinferlm/models.h>
 #include "model_loader/gguf/gguf.h"
-#include "models/qwen.h"
+#include "qwen/model.h"
 
 static_assert(sizeof(struct ggml_tensor) > 0, "ggml integration check");
 

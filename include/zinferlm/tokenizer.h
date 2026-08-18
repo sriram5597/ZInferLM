@@ -12,11 +12,6 @@
 
 namespace zinferlm
 {
-    struct token_t
-    {
-        std::string token;
-        uint64_t token_id;
-    };
     class Tokenizer
     {
     private:
@@ -43,6 +38,6 @@ namespace zinferlm
         static Tokenizer for_model(zinferlm::Model &model);
         void init();
         std::vector<std::string> pretokenize(std::string text);
-        std::vector<token_t> tokenize(std::string text);
+        std::vector<std::pair<std::string, uint64_t>> tokenize(std::string text);
     };
 };

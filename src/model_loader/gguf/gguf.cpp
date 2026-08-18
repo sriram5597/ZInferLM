@@ -36,7 +36,7 @@ std::unordered_map<std::string, std::unique_ptr<Metadata>> gguf_metadata(const c
   return metadata;
 }
 
-std::vector<std::unique_ptr<TensorInfo>> gguf_tensors_info(const char *ptr, uint64_t tensors_count)
+std::vector<std::unique_ptr<TensorInfo>> gguf_tensors_info(const char *&ptr, uint64_t tensors_count)
 {
   std::vector<std::unique_ptr<TensorInfo>> tensors;
   for (int i = 0; i < tensors_count; i++)
@@ -66,6 +66,7 @@ std::unique_ptr<GGUFLoader> load_gguf_file(int *fd, size_t file_size)
   const char *cur = base_ptr + sizeof(gguf_header_t);
   gguf.metadata = gguf_metadata(cur, header->metadata_kv_count);
   gguf.tensors = gguf_tensors_info(cur, header->tensor_count);
+  gguf.set_tensor_base_ptr(cur);
 
   auto unmap_deleter = [file_size](const char *ptr)
   {
@@ -87,6 +88,22 @@ zinferlm::model_info_t GGUFLoader::info() const
   uint32_t file_type = get_metadata("general.file_type")->value<uint32_t>();
   model_info.file_type = gguf_file_type_name(static_cast<gguf_file_type>(file_type));
   return model_info;
+}
+
+uint64_t GGUFLoader::align_address(uint64_t ptr) const
+{
+  uint32_t alignment = get_metadata("general.alignment")->value<uint8_t>();
+  if (!alignment)
+  {
+    alignment = 32;
+  }
+  return ptr + (alignment - ptr % alignment) % alignment;
+}
+
+void GGUFLoader::set_tensor_base_ptr(const char *ptr)
+{
+  uint64_t address = reinterpret_cast<uint64_t>(ptr);
+  tensor_base_ptr_ = reinterpret_cast<void *>(align_address(address));
 }
 
 Metadata *GGUFLoader::get_metadata(std::string key) const
@@ -122,10 +139,21 @@ std::vector<zinferlm::tensor_info_t> GGUFLoader::tensor_info() const
   for (auto &&t : tensors)
   {
     tinfo_list.push_back(zinferlm::tensor_info_t{
-        .name = t->name_string(),
-        .type = t->type_string(),
-        .n_dim = t->n_dim_sting(),
-        .dimensions = t->dims_string()});
+        .name = t->name->to_string(),
+        .type_name = ggml_type_name(*t->dtype),
+        .type_id = static_cast<uint32_t>(*t->dtype),
+        .n_dim = *t->n_dimensions,
+        .dimensions = t->dimensions});
   }
   return tinfo_list;
+}
+
+uint64_t GGUFLoader::get_tensor_count() const
+{
+  return header->tensor_count;
+}
+
+void *GGUFLoader::get_tensor_ptr(uint64_t offset) const
+{
+  return tensor_base_ptr_ + offset;
 }

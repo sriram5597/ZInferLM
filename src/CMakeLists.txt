@@ -1,10 +1,13 @@
 add_library(zinferlm ../include/zinferlm/models.h ../include/zinferlm/tokenizer.h
-    ./models.cpp
     ./model_loader/gguf/gguf.h ./model_loader/gguf/gguf.cpp 
     ./model_loader/gguf/metadata.cpp ./model_loader/gguf/metadata.h
     ./model_loader/gguf/tensors.cpp ./model_loader/gguf/tensors.h
     ./tokenizer/tokenizer.cpp ./tokenizer/tokenizer.h
-    ./models/qwen.cpp ./models/qwen.h
+    ./engine/graph.cpp ./engine/graph.h
+    ./engine/tensors.cpp ./engine/tensors.h
+    ./layers/layers.h ./layers/token_emb.cpp ./layers/token_unemb.cpp
+    ./models/qwen/model.cpp ./models/qwen/model.h
+    ./models/models.cpp
 )
 
 find_package(PkgConfig REQUIRED)
