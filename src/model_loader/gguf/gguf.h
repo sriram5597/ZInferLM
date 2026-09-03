@@ -104,11 +104,13 @@ class GGUFLoader : public ModelLoader
 public:
   const gguf_header_t *header;
   metadata_map_t metadata;
-  std::vector<std::unique_ptr<TensorInfo>> tensors;
+  std::unordered_map<std::string, std::unique_ptr<TensorInfo>> tensors;
   Metadata *get_metadata(std::string key) const;
   zinferlm::model_info_t info() const override;
   zinferlm::tokenizer_info_t tokenizer_info() const override;
   std::vector<zinferlm::tensor_info_t> tensor_info() const override;
+  zinferlm::tensor_info_t tensor_info(std::string name) const override;
+  zinferlm::model_config_t model_config() const override;
   uint64_t get_tensor_count() const override;
   void *get_tensor_ptr(uint64_t offset) const override;
 

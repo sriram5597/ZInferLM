@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <memory>
 #include <vector>
@@ -12,6 +13,14 @@ namespace zinferlm
     std::string version;
     std::string architecture;
     std::string file_type;
+  };
+
+  struct model_config_t {
+    uint32_t nheads;
+    uint32_t nkv;
+    float rope_freq_base;
+    uint32_t n_blocks;
+    uint64_t embedding_dim;
   };
 
   struct tokenizer_info_t

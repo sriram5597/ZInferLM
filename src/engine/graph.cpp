@@ -11,7 +11,7 @@
 
 ggml_context_ptr init_engine(uint64_t tensor_count)
 {
-    uint64_t ctx_size = tensor_count * ggml_tensor_overhead() + ggml_graph_overhead() + 2048;
+    uint64_t ctx_size = 2048 * ggml_tensor_overhead() + ggml_graph_overhead() + 2048;
     ggml_init_params params = {
         .mem_size = ctx_size,
         .mem_buffer = nullptr,

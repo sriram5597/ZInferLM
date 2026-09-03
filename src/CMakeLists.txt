@@ -5,7 +5,8 @@ add_library(zinferlm ../include/zinferlm/models.h ../include/zinferlm/tokenizer.
     ./tokenizer/tokenizer.cpp ./tokenizer/tokenizer.h
     ./engine/graph.cpp ./engine/graph.h
     ./engine/tensors.cpp ./engine/tensors.h
-    ./layers/layers.h ./layers/token_emb.cpp ./layers/token_unemb.cpp
+    ./layers/layers.h ./layers/token_emb.cpp ./layers/token_unemb.cpp ./layers/norm.cpp
+    ./layers/block.cpp ./layers/grouped_attn.cpp ./layers/swiglu.cpp
     ./models/qwen/model.cpp ./models/qwen/model.h
     ./models/models.cpp
 )

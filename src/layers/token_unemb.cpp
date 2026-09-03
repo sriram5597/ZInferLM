@@ -4,9 +4,11 @@
 #include <zinferlm/models.h>
 #include "layers.h"
 
-TokenUnembedding::TokenUnembedding(token_unembedding_params_t params) : ctx_(params.ctx), unemb_w_(params.unemb_w) {}
+TokenUnembedding::TokenUnembedding(token_unembedding_params_t params) : Layer(params.ctx), unemb_w_(params.unemb_w) {
+  name = "TokenUnembedding";
+}
 
-ggml_tensor *TokenUnembedding::operator()(ggml_tensor *x) const
+ggml_tensor *TokenUnembedding::forward(ggml_tensor *x) const
 {
     return ggml_mul_mat(ctx_, unemb_w_, x);
 }

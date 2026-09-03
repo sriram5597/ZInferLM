@@ -1,77 +1,70 @@
 #include <cmath>
+#include <cstddef>
+#include <cstring>
+#include <ggml-backend.h>
 #include <ggml.h>
 
 #include "layers.h"
 
 GroupedAttentionHead::GroupedAttentionHead(grouped_attn_head_params params)
-    : ctx_(params.ctx), q_w_(params.q_w), q_b_(params.q_b), k_w_(params.k_w),
+    : Layer(params.ctx), q_w_(params.q_w), q_b_(params.q_b), k_w_(params.k_w),
       k_b_(params.k_b), v_w_(params.v_w), v_b_(params.v_b),
-      out_w_(params.out_w), out_b_(params.out_b),
-      rope_freq_base_(params.rope_freq_base), apply_rope_(params.apply_rope),
-      n_heads_(params.n_heads), n_kv_(params.n_kv) {
+      out_w_(params.out_w), rope_freq_base_(params.rope_freq_base),
+      apply_rope_(params.apply_rope), n_heads_(params.n_heads),
+      n_kv_(params.n_kv), past_tokens_(params.past_tokens), len_(params.len) {
   name = "GroupedAttention";
+  residual_=params.re
 }
 
-ggml_tensor *GroupedAttentionHead::operator()(ggml_tensor *x) const {
+ggml_tensor *GroupedAttentionHead::forward(ggml_tensor *x) const {
   ggml_tensor *Q = ggml_mul_mat(ctx_, q_w_, x);
   if (q_b_ != nullptr) {
-    Q = ggml_add(ctx_, q_b_, Q);
+    Q = ggml_add(ctx_, Q, q_b_);
   }
   ggml_tensor *K = ggml_mul_mat(ctx_, k_w_, x);
   if (k_b_ != nullptr) {
-    K = ggml_add(ctx_, k_b_, K);
+    K = ggml_add(ctx_, K, k_b_);
   }
   ggml_tensor *V = ggml_mul_mat(ctx_, v_w_, x);
   if (v_b_ != nullptr) {
-    V = ggml_add(ctx_, v_b_, V);
-  }
-  if (apply_rope_) {
-    Q = ggml_rope_ext(ctx_, // 1.  Computation context
-                      Q,    // 2.  Input tensor to rotate (Query or Key)
-                      NULL, // 3.  Custom position tensor (optional)
-                      0,    // 4.  Sequence position offset (n_past)
-                      0,    // 5.  Number of rotated dimensions (n_dims)
-                      0,    // 6.  RoPE mode / style flags
-                      0,    // 7.  Original context training length (n_ctx_orig)
-                      rope_freq_base_, // 8.  Base frequency theta (e.g.,
-                                       // 1,000,000.0f for Qwen)
-                      1.0f,            // 9.  Frequency scale factor
-                      0.0f, // 10. YaRN extrapolation factor (ext_factor)
-                      1.0f, // 11. Attention scale factor (attn_factor)
-                      0.0f, // 12. YaRN low-frequency cutoff (beta_fast)
-                      0.0f  // 13. YaRN high-frequency cutoff (beta_slow)
-    );
-    K = ggml_rope_ext(ctx_, // 1.  Computation context
-                      K,    // 2.  Input tensor to rotate (Query or Key)
-                      NULL, // 3.  Custom position tensor (optional)
-                      0,    // 4.  Sequence position offset (n_past)
-                      0,    // 5.  Number of rotated dimensions (n_dims)
-                      0,    // 6.  RoPE mode / style flags
-                      0,    // 7.  Original context training length (n_ctx_orig)
-                      rope_freq_base_, // 8.  Base frequency theta (e.g.,
-                                       // 1,000,000.0f for Qwen)
-                      1.0f,            // 9.  Frequency scale factor
-                      0.0f, // 10. YaRN extrapolation factor (ext_factor)
-                      1.0f, // 11. Attention scale factor (attn_factor)
-                      0.0f, // 12. YaRN low-frequency cutoff (beta_fast)
-                      0.0f  // 13. YaRN high-frequency cutoff (beta_slow)
-    );
+    V = ggml_add(ctx_, V, v_b_);
   }
   int d_head = x->ne[0] / n_heads_;
   ggml_tensor *Q_transformed =
-      ggml_reshape_4d(ctx_, Q, d_head, x->ne[1], n_heads_, 1);
-  ggml_tensor *K_transformed =
-      ggml_reshape_4d(ctx_, K, d_head, x->ne[1], n_kv_, 1);
-  ggml_tensor *V_transformed =
-      ggml_reshape_4d(ctx_, V, d_head, x->ne[1], n_kv_, 1);
+      ggml_reshape_4d(ctx_, Q, d_head, n_heads_, len_, 1);
+  ggml_tensor *K_transformed = ggml_reshape_4d(ctx_, K, d_head, n_kv_, len_, 1);
+  ggml_tensor *V_transformed = ggml_reshape_4d(ctx_, V, d_head, len_, n_kv_, 1);
+
+  if (apply_rope_) {
+    ggml_tensor *positions =
+        ggml_cast(ctx_, ggml_arange(ctx_, past_tokens_, past_tokens_ + len_, 1),
+                  GGML_TYPE_I32);
+    Q_transformed =
+        ggml_rope_ext(ctx_, Q_transformed, positions, NULL, d_head, 0, 0,
+                      rope_freq_base_, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f);
+    K_transformed =
+        ggml_rope_ext(ctx_, K_transformed, positions, NULL, d_head, 0, 0,
+                      rope_freq_base_, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f);
+  }
+  K_transformed = ggml_permute(ctx_, K_transformed, 0, 2, 1, 3);
+  Q_transformed = ggml_permute(ctx_, Q_transformed, 0, 2, 1, 3);
+  ggml_tensor *r = ggml_repeat(ctx_, K_transformed, Q_transformed);
+
   ggml_tensor *KQ = ggml_mul_mat(
       ctx_, ggml_repeat(ctx_, K_transformed, Q_transformed), Q_transformed);
-  const float scale = 1.0f / sqrtf((float)Q->ne[0]);
+  const float scale = 1.0f / sqrtf((float)d_head);
   KQ = ggml_scale(ctx_, KQ, scale);
   KQ = ggml_diag_mask_inf(ctx_, KQ, x->ne[1]);
-  ggml_tensor *scaled_attn =
-      ggml_mul_mat(ctx_, V_transformed, ggml_soft_max(ctx_, KQ));
-  ggml_tensor *attn_out = ggml_mul_mat(
-      ctx_, ggml_reshape_2d(ctx_, scaled_attn, x->ne[0], x->ne[1]), out_w_);
+  V_transformed = ggml_repeat(ctx_, V_transformed, Q_transformed);
+  V_transformed = ggml_permute(ctx_, V_transformed, 1, 0, 2, 3);
+
+  ggml_tensor *scaled_attn = ggml_mul_mat(ctx_, ggml_cont(ctx_, V_transformed),
+                                          ggml_soft_max(ctx_, KQ));
+  ggml_tensor *attn_trans = ggml_permute(ctx_, scaled_attn, 0, 2, 1, 3);
+  attn_trans = ggml_cont(ctx_, attn_trans);
+  attn_trans = ggml_reshape_2d(ctx_, attn_trans, x->ne[0], x->ne[1]);
+
+  ggml_tensor *attn_out = ggml_mul_mat(ctx_, out_w_, attn_trans);
+
   return attn_out;
 }

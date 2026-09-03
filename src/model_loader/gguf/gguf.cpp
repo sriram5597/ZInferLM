@@ -2,6 +2,7 @@
 #include <functional>
 #include <cstddef>
 #include <cstdint>
+#include <ostream>
 #include <unistd.h>
 #include <vector>
 #include <map>
@@ -36,16 +37,16 @@ std::unordered_map<std::string, std::unique_ptr<Metadata>> gguf_metadata(const c
   return metadata;
 }
 
-std::vector<std::unique_ptr<TensorInfo>> gguf_tensors_info(const char *&ptr, uint64_t tensors_count)
+std::unordered_map<std::string, std::unique_ptr<TensorInfo>> gguf_tensors_info(const char *&ptr, uint64_t tensors_count)
 {
-  std::vector<std::unique_ptr<TensorInfo>> tensors;
+  std::unordered_map<std::string, std::unique_ptr<TensorInfo>> tensors_map;
   for (int i = 0; i < tensors_count; i++)
   {
     TensorInfo t = TensorInfo::from_ptr(ptr);
     ptr += t.size();
-    tensors.push_back(std::make_unique<TensorInfo>(std::move(t)));
+    tensors_map.insert({t.name->to_string(), std::make_unique<TensorInfo>(std::move(t))});
   }
-  return tensors;
+  return tensors_map;
 }
 
 std::unique_ptr<GGUFLoader> load_gguf_file(int *fd, size_t file_size)
@@ -90,6 +91,16 @@ zinferlm::model_info_t GGUFLoader::info() const
   return model_info;
 }
 
+zinferlm::model_config_t GGUFLoader::model_config() const {
+  zinferlm::model_config_t config;
+  config.nheads = get_metadata("qwen2.attention.head_count")->value<uint32_t>();
+  config.nkv = get_metadata("qwen2.attention.head_count_kv")->value<uint32_t>();
+  config.rope_freq_base = get_metadata("qwen2.rope.freq_base")->value<float>();
+  config.embedding_dim = get_metadata("qwen2.embedding_length")->value<uint32_t>();
+  config.n_blocks = get_metadata("qwen2.block_count")->value<uint32_t>();
+  return config;
+}
+
 uint64_t GGUFLoader::align_address(uint64_t ptr) const
 {
   uint32_t alignment = get_metadata("general.alignment")->value<uint8_t>();
@@ -111,8 +122,10 @@ Metadata *GGUFLoader::get_metadata(std::string key) const
   const auto &it = metadata.find(key);
   if (it != metadata.end())
   {
+    std::cout << "Metadata: " << it->second->key_string() << " " << it->second->dtype() << std::endl;
     return it->second.get();
   }
+  std::cout << "Metadata not found: " << key << std::endl;
   return const_cast<Metadata *>(&default_metadata_);
 }
 
@@ -136,8 +149,9 @@ zinferlm::tokenizer_info_t GGUFLoader::tokenizer_info() const
 std::vector<zinferlm::tensor_info_t> GGUFLoader::tensor_info() const
 {
   std::vector<zinferlm::tensor_info_t> tinfo_list;
-  for (auto &&t : tensors)
+  for (auto &&ele : tensors)
   {
+    auto&& t = ele.second;
     tinfo_list.push_back(zinferlm::tensor_info_t{
         .name = t->name->to_string(),
         .type_name = ggml_type_name(*t->dtype),
@@ -146,6 +160,21 @@ std::vector<zinferlm::tensor_info_t> GGUFLoader::tensor_info() const
         .dimensions = t->dimensions});
   }
   return tinfo_list;
+}
+
+zinferlm::tensor_info_t GGUFLoader::tensor_info(std::string name) const {
+  const auto &it = tensors.find(name);
+  if (it != tensors.end())
+  {
+    TensorInfo* t = it->second.get();
+    return zinferlm::tensor_info_t{
+        .name = t->name->to_string(),
+        .type_name = ggml_type_name(*t->dtype),
+        .type_id = static_cast<uint32_t>(*t->dtype),
+        .n_dim = *t->n_dimensions,
+        .dimensions = t->dimensions};
+  }
+  return zinferlm::tensor_info_t{};
 }
 
 uint64_t GGUFLoader::get_tensor_count() const
