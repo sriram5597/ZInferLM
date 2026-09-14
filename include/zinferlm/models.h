@@ -21,6 +21,7 @@ namespace zinferlm
     float rope_freq_base;
     uint32_t n_blocks;
     uint64_t embedding_dim;
+    float rms_eps;
   };
 
   struct tokenizer_info_t
@@ -53,9 +54,8 @@ namespace zinferlm
     virtual model_info_t info() const = 0;
     virtual tokenizer_info_t tokenizer_info() const = 0;
     virtual std::vector<tensor_info_t> tensor_info() const = 0;
-    virtual std::string invoke(std::string input) = 0;
-    virtual std::vector<uint32_t> tokenize(std::string input) = 0;
-    virtual void summary(std::string input) = 0;
+    virtual std::vector<float> invoke(std::vector<uint32_t> tokens) = 0;
+    virtual void summary() = 0;
 
     static Model &instance();
     static bool load(const char *model_path);

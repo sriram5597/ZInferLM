@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <ggml-cpp.h>
 #include <ggml.h>
 #include <memory>
@@ -16,23 +17,20 @@ private:
   std::vector<std::pair<Layers, std::string>> pre_attn_blocks_ = {
       {Layers::TOKEN_EMBEDDING, "token_embd"}};
   std::vector<std::pair<Layers, std::string>> attn_blocks_ = {
-      {Layers::NORM, "attn_norm"},
       {Layers::GROUPED_ATTN, "attn"},
-      {Layers::NORM, "ffn_norm"},
       {Layers::SWIGLU, "ffn"}};
   std::vector<std::pair<Layers, std::string>> post_attn_blocks_ = {
-      {Layers::NORM, "output_norm"}, {Layers::TOKEN_UNEMBEDDING, "output"}};
+      {Layers::TOKEN_UNEMBEDDING, "output"}};
   Layer *create_layer_(ggml_context *ctx, std::string layer_name,
                        Layers layer_type, int past_tokens, int len);
 
 public:
-  QwenModel(std::unique_ptr<ModelLoader> f) : loader_(std::move(f)) {}
+  QwenModel(std::unique_ptr<ModelLoader> f);
   zinferlm::model_info_t info() const override;
   zinferlm::tokenizer_info_t tokenizer_info() const override;
   std::vector<zinferlm::tensor_info_t> tensor_info() const override;
-  std::string invoke(std::string input) override;
-  std::vector<uint32_t> tokenize(std::string input) override;
-  void summary(std::string input) override;
+  std::vector<float> invoke(std::vector<uint32_t> tokens) override;
+  void summary() override;
   Block *create_attn_block_(ggml_context *ctx, int block_id, int past_tokens,
                             int len);
 };

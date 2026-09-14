@@ -4,7 +4,9 @@
 #include <zinferlm/models.h>
 #include "layers.h"
 
-TokenUnembedding::TokenUnembedding(token_unembedding_params_t params) : Layer(params.ctx), unemb_w_(params.unemb_w) {
+TokenUnembedding::TokenUnembedding(token_unembedding_params_t params)
+    : Layer(params.ctx, false, params.norm_gamma, params.norm_eps),
+      unemb_w_(params.unemb_w) {
   name = "TokenUnembedding";
 }
 

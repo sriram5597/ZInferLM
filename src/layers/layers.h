@@ -11,7 +11,6 @@ enum Layers {
   GROUPED_ATTN,
   TOKEN_EMBEDDING,
   TOKEN_UNEMBEDDING,
-  NORM,
   SWIGLU,
   BLOCK,
 };
@@ -20,14 +19,25 @@ class Layer {
 protected:
   ggml_context *ctx_;
   bool residual_ = false;
+  ggml_tensor *pre_norm_gamma_ = nullptr;
+  float pre_norm_eps_ = 0.0f;
   virtual ggml_tensor *forward(ggml_tensor *x) const = 0;
 
 public:
   Layer(ggml_context *ctx) : ctx_(ctx) {}
+  Layer(ggml_context *ctx, bool residual, ggml_tensor *pre_norm_gamma,
+        float pre_norm_eps)
+      : ctx_(ctx), residual_(residual), pre_norm_gamma_(pre_norm_gamma),
+        pre_norm_eps_(pre_norm_eps) {}
   virtual ~Layer() = default;
   std::string name;
   ggml_tensor *operator()(ggml_tensor *x) const {
-    auto out = forward(x);
+    ggml_tensor *in = x;
+    if (pre_norm_gamma_ != nullptr) {
+      in = ggml_mul(ctx_, ggml_rms_norm(ctx_, x, pre_norm_eps_),
+                    pre_norm_gamma_);
+    }
+    ggml_tensor *out = forward(in);
     return residual_ ? ggml_add(ctx_, out, x) : out;
   }
   void set_residual(bool v) { residual_ = v; }
@@ -50,6 +60,8 @@ public:
 struct token_unembedding_params_t {
   ggml_context *ctx;
   ggml_tensor *unemb_w;
+  ggml_tensor *norm_gamma;
+  float norm_eps;
 };
 
 class TokenUnembedding : public Layer {
@@ -72,6 +84,8 @@ struct grouped_attn_head_params {
   int past_tokens;
   int len;
   bool residual;
+  ggml_tensor *norm_gamma;
+  float norm_eps;
 };
 
 class GroupedAttentionHead : public Layer {
@@ -93,6 +107,8 @@ struct swiglu_params_t {
   ggml_tensor *w_down;
   ggml_tensor *w_up;
   bool residual;
+  ggml_tensor *norm_gamma;
+  float norm_eps;
 };
 
 class SwigLU : public Layer {
@@ -104,30 +120,14 @@ public:
   ggml_tensor *forward(ggml_tensor *x) const override;
 };
 
-struct norm_params_t {
-  ggml_context *ctx;
-  ggml_tensor *gamma;
-  float eps;
-};
-
-class NormLayer : public Layer {
-private:
-  ggml_tensor *gamma_;
-  float eps_;
-
-public:
-  NormLayer(norm_params_t params);
-  ggml_tensor *forward(ggml_tensor *x) const override;
-};
-
 struct block_params_t {
-  ggml_context* ctx;
-  std::vector<Layer*> layers;
+  ggml_context *ctx;
+  std::vector<Layer *> layers;
 };
 
 class Block : public Layer {
 private:
-  std::vector<Layer*> layers_;
+  std::vector<Layer *> layers_;
 
 public:
   Block(block_params_t params);

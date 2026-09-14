@@ -2,7 +2,8 @@
 #include "layers.h"
 
 SwigLU::SwigLU(swiglu_params_t params)
-    : Layer(params.ctx), w_gate_(params.w_gate), w_up_(params.w_up), w_down_(params.w_down) {}
+    : Layer(params.ctx, params.residual, params.norm_gamma, params.norm_eps),
+      w_gate_(params.w_gate), w_up_(params.w_up), w_down_(params.w_down) {}
 
 ggml_tensor *SwigLU::forward(ggml_tensor *x) const {
   ggml_tensor *gate = ggml_mul_mat(ctx_, w_gate_, x);

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
+#include <sys/types.h>
 #include <vector>
 #include <memory>
 #include <unordered_map>
@@ -24,8 +26,10 @@ namespace zinferlm
         Pcre2CodePtr re_{nullptr, pcre2_code_free};
         Pcre2DataPtr match_data_{nullptr, pcre2_match_data_free};
         std::unordered_map<uint8_t, std::string> byte_to_unicode_map_;
+        std::unordered_map<std::string, uint8_t> unicode_to_byte_map_;
         std::vector<std::string> tokens_;
         std::unordered_map<std::string, uint64_t> token_to_id_map_;
+        std::unordered_map<uint64_t, std::string> id_to_token_map_;
 
         Tokenizer(std::string m, std::string p, std::vector<std::string> t) : model_(m), pre_(p), tokens_(t) {}
         void init_pretokenize_();
@@ -33,11 +37,13 @@ namespace zinferlm
         void build_token_id_map_();
         void build_merges_map_(std::vector<std::string> merges);
         std::vector<std::string> split_and_merge_(std::string chunk);
+        std::string unicode_to_chars_(std::string s) const;
 
     public:
         static Tokenizer for_model(zinferlm::Model &model);
         void init();
         std::vector<std::string> pretokenize(std::string text);
-        std::vector<std::pair<std::string, uint64_t>> tokenize(std::string text);
+        std::vector<uint32_t> tokenize(std::string text);
+        std::string decode(uint32_t token_id) const;
     };
 };

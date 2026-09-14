@@ -1,3 +1,4 @@
+#include "zinferlm/inference.h"
 #include <csignal>
 #include <iostream>
 #include <string>
@@ -57,12 +58,12 @@ int main(int argc, char *argv[])
         zinferlm::Tokenizer tokenizer = zinferlm::Tokenizer::for_model(model);
         auto tokens = tokenizer.tokenize(args);
         for (auto &t : tokens)
-          std::cout << "(" << t.first << ", " << t.second << ") ";
+          std::cout << t << " ";
         std::cout << std::endl;
       }
       else if (cmd == "/graph")
       {
-        model.summary(args);
+        model.summary();
       }
       else
       {
@@ -70,7 +71,8 @@ int main(int argc, char *argv[])
       }
       continue;
     }
-    std::string output = model.invoke(input);
+    zinferlm::Inference infer;
+    std::string output = infer.invoke(input);
     std::cout << output << std::endl;
   }
 

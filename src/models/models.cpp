@@ -35,10 +35,8 @@ bool zinferlm::Model::load(const char *model_path)
         return false;
     }
     size_t file_size = model_stats.st_size;
-    std::cout << "File Size: " << file_size / (1024 * 1024) << " MB " << std::endl;
     if (is_gguf_file(&raw_fd))
     {
-        std::cout << "Detected GGUF File" << std::endl;
         std::unique_ptr<ModelLoader> f = load_gguf_file(&raw_fd, file_size);
         QwenModel model = QwenModel(std::move(f));
         instance_ = std::make_unique<QwenModel>(std::move(model));

@@ -98,6 +98,7 @@ zinferlm::model_config_t GGUFLoader::model_config() const {
   config.rope_freq_base = get_metadata("qwen2.rope.freq_base")->value<float>();
   config.embedding_dim = get_metadata("qwen2.embedding_length")->value<uint32_t>();
   config.n_blocks = get_metadata("qwen2.block_count")->value<uint32_t>();
+  config.rms_eps = get_metadata("qwen2.attention.layer_norm_rms_epsilon")->value<float>();
   return config;
 }
 
@@ -122,10 +123,8 @@ Metadata *GGUFLoader::get_metadata(std::string key) const
   const auto &it = metadata.find(key);
   if (it != metadata.end())
   {
-    std::cout << "Metadata: " << it->second->key_string() << " " << it->second->dtype() << std::endl;
     return it->second.get();
   }
-  std::cout << "Metadata not found: " << key << std::endl;
   return const_cast<Metadata *>(&default_metadata_);
 }
 
@@ -157,6 +156,7 @@ std::vector<zinferlm::tensor_info_t> GGUFLoader::tensor_info() const
         .type_name = ggml_type_name(*t->dtype),
         .type_id = static_cast<uint32_t>(*t->dtype),
         .n_dim = *t->n_dimensions,
+        .data_offset = *t->offset,
         .dimensions = t->dimensions});
   }
   return tinfo_list;
@@ -172,6 +172,7 @@ zinferlm::tensor_info_t GGUFLoader::tensor_info(std::string name) const {
         .type_name = ggml_type_name(*t->dtype),
         .type_id = static_cast<uint32_t>(*t->dtype),
         .n_dim = *t->n_dimensions,
+        .data_offset = *t->offset,
         .dimensions = t->dimensions};
   }
   return zinferlm::tensor_info_t{};

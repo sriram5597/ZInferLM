@@ -7,13 +7,13 @@
 #include "layers.h"
 
 GroupedAttentionHead::GroupedAttentionHead(grouped_attn_head_params params)
-    : Layer(params.ctx), q_w_(params.q_w), q_b_(params.q_b), k_w_(params.k_w),
+    : Layer(params.ctx, params.residual, params.norm_gamma, params.norm_eps),
+      q_w_(params.q_w), q_b_(params.q_b), k_w_(params.k_w),
       k_b_(params.k_b), v_w_(params.v_w), v_b_(params.v_b),
       out_w_(params.out_w), rope_freq_base_(params.rope_freq_base),
       apply_rope_(params.apply_rope), n_heads_(params.n_heads),
       n_kv_(params.n_kv), past_tokens_(params.past_tokens), len_(params.len) {
   name = "GroupedAttention";
-  residual_=params.re
 }
 
 ggml_tensor *GroupedAttentionHead::forward(ggml_tensor *x) const {
@@ -33,28 +33,32 @@ ggml_tensor *GroupedAttentionHead::forward(ggml_tensor *x) const {
   ggml_tensor *Q_transformed =
       ggml_reshape_4d(ctx_, Q, d_head, n_heads_, len_, 1);
   ggml_tensor *K_transformed = ggml_reshape_4d(ctx_, K, d_head, n_kv_, len_, 1);
-  ggml_tensor *V_transformed = ggml_reshape_4d(ctx_, V, d_head, len_, n_kv_, 1);
+  ggml_tensor *V_transformed = ggml_reshape_4d(ctx_, V, d_head, n_kv_, len_, 1);
 
   if (apply_rope_) {
     ggml_tensor *positions =
         ggml_cast(ctx_, ggml_arange(ctx_, past_tokens_, past_tokens_ + len_, 1),
                   GGML_TYPE_I32);
     Q_transformed =
-        ggml_rope_ext(ctx_, Q_transformed, positions, NULL, d_head, 0, 0,
-                      rope_freq_base_, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f);
+        ggml_rope_ext(ctx_, Q_transformed, positions, NULL, d_head,
+                      GGML_ROPE_TYPE_NEOX, 0, rope_freq_base_, 1.0f, 0.0f,
+                      1.0f, 0.0f, 0.0f);
     K_transformed =
-        ggml_rope_ext(ctx_, K_transformed, positions, NULL, d_head, 0, 0,
-                      rope_freq_base_, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f);
+        ggml_rope_ext(ctx_, K_transformed, positions, NULL, d_head,
+                      GGML_ROPE_TYPE_NEOX, 0, rope_freq_base_, 1.0f, 0.0f,
+                      1.0f, 0.0f, 0.0f);
   }
-  K_transformed = ggml_permute(ctx_, K_transformed, 0, 2, 1, 3);
+
   Q_transformed = ggml_permute(ctx_, Q_transformed, 0, 2, 1, 3);
-  ggml_tensor *r = ggml_repeat(ctx_, K_transformed, Q_transformed);
+  K_transformed = ggml_permute(ctx_, K_transformed, 0, 2, 1, 3);
+  V_transformed = ggml_permute(ctx_, V_transformed, 0, 2, 1, 3);
 
   ggml_tensor *KQ = ggml_mul_mat(
       ctx_, ggml_repeat(ctx_, K_transformed, Q_transformed), Q_transformed);
+  ggml_mul_mat_set_prec(KQ, GGML_PREC_F32);
   const float scale = 1.0f / sqrtf((float)d_head);
   KQ = ggml_scale(ctx_, KQ, scale);
-  KQ = ggml_diag_mask_inf(ctx_, KQ, x->ne[1]);
+  KQ = ggml_diag_mask_inf(ctx_, KQ, past_tokens_);
   V_transformed = ggml_repeat(ctx_, V_transformed, Q_transformed);
   V_transformed = ggml_permute(ctx_, V_transformed, 1, 0, 2, 3);
 
