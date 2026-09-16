@@ -15,11 +15,6 @@ Sampler::Sampler(sampler_params_t params)
 std::pair<uint64_t, float> Sampler::greedy_(std::vector<float> logits) {
   auto max_logit = std::max_element(logits.begin(), logits.end());
   uint64_t max_ele = std::distance(logits.begin(), max_logit);
-  for (int i = 0; i < 10; i++) {
-    std::cout << logits[i] << " ";
-  }
-  std::cout << std::endl;
-  std::cout << "max logit: " << *max_logit << " " << max_ele << std::endl;
   return std::pair<uint64_t, float>(max_ele, *max_logit);
 }
 

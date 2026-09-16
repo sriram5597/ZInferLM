@@ -54,14 +54,17 @@ namespace zinferlm
     virtual model_info_t info() const = 0;
     virtual tokenizer_info_t tokenizer_info() const = 0;
     virtual std::vector<tensor_info_t> tensor_info() const = 0;
-    virtual std::vector<float> invoke(std::vector<uint32_t> tokens) = 0;
+    virtual std::vector<float> invoke(std::vector<int32_t> tokens) = 0;
     virtual void summary() = 0;
 
     static Model &instance();
     static bool load(const char *model_path);
 
+    void set_debug(bool enabled) { debug_ = enabled; }
+
   protected:
     Model() = default;
+    bool debug_ = false;
 
   private:
     static std::unique_ptr<Model> instance_;

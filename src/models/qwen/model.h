@@ -17,8 +17,7 @@ private:
   std::vector<std::pair<Layers, std::string>> pre_attn_blocks_ = {
       {Layers::TOKEN_EMBEDDING, "token_embd"}};
   std::vector<std::pair<Layers, std::string>> attn_blocks_ = {
-      {Layers::GROUPED_ATTN, "attn"},
-      {Layers::SWIGLU, "ffn"}};
+      {Layers::GROUPED_ATTN, "attn"}, {Layers::SWIGLU, "ffn"}};
   std::vector<std::pair<Layers, std::string>> post_attn_blocks_ = {
       {Layers::TOKEN_UNEMBEDDING, "output"}};
   Layer *create_layer_(ggml_context *ctx, std::string layer_name,
@@ -29,7 +28,7 @@ public:
   zinferlm::model_info_t info() const override;
   zinferlm::tokenizer_info_t tokenizer_info() const override;
   std::vector<zinferlm::tensor_info_t> tensor_info() const override;
-  std::vector<float> invoke(std::vector<uint32_t> tokens) override;
+  std::vector<float> invoke(std::vector<int32_t> tokens) override;
   void summary() override;
   Block *create_attn_block_(ggml_context *ctx, int block_id, int past_tokens,
                             int len);

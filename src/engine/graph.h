@@ -24,7 +24,7 @@ private:
 public:
     Graph(ggml_context *c, std::vector<Layer *> l);
     ggml_cgraph *build(uint32_t n_tokens);
-    ggml_tensor *execute(std::vector<uint32_t> input);
+    ggml_tensor *execute(std::vector<int32_t> input);
     
     void set_debug_mode(bool enabled) { debug_mode_ = enabled; }
 };

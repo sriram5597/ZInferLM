@@ -43,7 +43,7 @@ namespace zinferlm
         static Tokenizer for_model(zinferlm::Model &model);
         void init();
         std::vector<std::string> pretokenize(std::string text);
-        std::vector<uint32_t> tokenize(std::string text);
+        std::vector<int32_t> tokenize(std::string text);
         std::string decode(uint32_t token_id) const;
     };
 };

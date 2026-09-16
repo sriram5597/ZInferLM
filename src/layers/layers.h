@@ -4,6 +4,7 @@
 #include <ggml-cpp.h>
 #include <ggml.h>
 
+#include <ostream>
 #include <vector>
 #include <zinferlm/models.h>
 
@@ -34,11 +35,20 @@ public:
   ggml_tensor *operator()(ggml_tensor *x) const {
     ggml_tensor *in = x;
     if (pre_norm_gamma_ != nullptr) {
-      in = ggml_mul(ctx_, ggml_rms_norm(ctx_, x, pre_norm_eps_),
+      ggml_tensor* rms = ggml_rms_norm(ctx_, x, pre_norm_eps_);
+      ggml_set_name(rms, (name + "-rms").c_str());
+      in = ggml_mul(ctx_, rms,
                     pre_norm_gamma_);
+      ggml_set_name(in, (name + "-norm").c_str());
     }
+    //TODO GGML tensor names are not set properly. THe -norm tensor is named as out and The name for out should be -residual as the attn layer has residual enabled
     ggml_tensor *out = forward(in);
-    return residual_ ? ggml_add(ctx_, out, x) : out;
+    ggml_set_name(out, (name + "-out").c_str());
+    if (residual_) {
+      out = ggml_add(ctx_, out, x);
+      ggml_set_name(out, (name + "-residual").c_str());
+    }
+    return out;
   }
   void set_residual(bool v) { residual_ = v; }
 };
@@ -86,6 +96,7 @@ struct grouped_attn_head_params {
   bool residual;
   ggml_tensor *norm_gamma;
   float norm_eps;
+  bool debug = false;
 };
 
 class GroupedAttentionHead : public Layer {
@@ -95,6 +106,7 @@ private:
   float rope_freq_base_;
   uint32_t n_heads_, n_kv_;
   int past_tokens_, len_;
+  bool debug_;
 
 public:
   GroupedAttentionHead(grouped_attn_head_params);

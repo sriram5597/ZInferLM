@@ -73,8 +73,6 @@ void zinferlm::Tokenizer::build_merges_map_(std::vector<std::string> merges) {
 
 void zinferlm::Tokenizer::build_token_id_map_() {
   for (int i = 0; i < tokens_.size(); i++) {
-    if (tokens_[i] == "<|im_start|>")
-      std::cout << "Token found: <|im_start|>" << std::endl;
     token_to_id_map_[tokens_[i]] = i;
     id_to_token_map_[i] = tokens_[i];
   }
@@ -196,7 +194,7 @@ std::string zinferlm::Tokenizer::unicode_to_chars_(std::string token) const {
   return out;
 }
 
-std::vector<uint32_t> zinferlm::Tokenizer::tokenize(std::string text) {
+std::vector<int32_t> zinferlm::Tokenizer::tokenize(std::string text) {
   std::vector<std::string> final_tokens;
   std::vector<std::string> chunks = pretokenize(text);
   std::cout << "[Pretokenize] tokens:\n";
@@ -208,7 +206,7 @@ std::vector<uint32_t> zinferlm::Tokenizer::tokenize(std::string text) {
     std::vector<std::string> tokens = split_and_merge_(c);
     final_tokens.insert(final_tokens.end(), tokens.begin(), tokens.end());
   }
-  std::vector<uint32_t> token_list;
+  std::vector<int32_t> token_list;
   for (auto t : final_tokens) {
     token_list.push_back(token_to_id_map_[t]);
   }

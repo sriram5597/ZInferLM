@@ -113,6 +113,7 @@ Layer *QwenModel::create_layer_(ggml_context *ctx, std::string layer_name,
             loader_->get_tensor_ptr(norm_info.data_offset),
             norm_info.dimensions),
         .norm_eps = config.rms_eps,
+        .debug = debug_,
         };
     layer = new GroupedAttentionHead(attn_params);
     break;
@@ -193,7 +194,7 @@ QwenModel::build_graph_(ggml_context *ctx, int past_tokens, int len) {
   return layers;
 }
 
-std::vector<float> QwenModel::invoke(std::vector<uint32_t> tokens) {
+std::vector<float> QwenModel::invoke(std::vector<int32_t> tokens) {
   ggml_context_ptr ctx =
       init_engine(loader_->model_config().n_blocks * 64 + 256);
   std::vector<std::unique_ptr<Layer>> layers =
@@ -204,17 +205,12 @@ std::vector<float> QwenModel::invoke(std::vector<uint32_t> tokens) {
     layer_ptrs.push_back(l.get());
   }
   Graph graph(ctx.get(), layer_ptrs);
-  graph.set_debug_mode(true);  // Enable debug logging
+  graph.set_debug_mode(debug_);
   ggml_tensor *output = graph.execute(tokens);
   GGML_ASSERT(tokens.size() <= output->ne[1]);
   std::vector<float> logits(output->ne[0]);
   uint64_t offset =
       (tokens.size() - 1) * output->ne[0] * ggml_type_size(output->type);
-  std::cout << "logits data: " << std::endl;
-  for (int i = 0; i < 10; i++) {
-    std::cout << reinterpret_cast<float*>(output->data)[i] << " ";
-  }
-  std::cout << "\n---------------" << std::endl;
   ggml_backend_tensor_get(output, logits.data(), offset,
                           output->ne[0] * ggml_type_size(output->type));
   return logits;
