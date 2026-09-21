@@ -8,6 +8,8 @@
 #include <vector>
 #include <zinferlm/models.h>
 
+#include "kv_cache/cache.h"
+
 enum Layers {
   GROUPED_ATTN,
   TOKEN_EMBEDDING,
@@ -19,6 +21,7 @@ enum Layers {
 class Layer {
 protected:
   ggml_context *ctx_;
+  ggml_cgraph *gf_ = nullptr;
   bool residual_ = false;
   ggml_tensor *pre_norm_gamma_ = nullptr;
   float pre_norm_eps_ = 0.0f;
@@ -28,8 +31,8 @@ public:
   Layer(ggml_context *ctx) : ctx_(ctx) {}
   Layer(ggml_context *ctx, bool residual, ggml_tensor *pre_norm_gamma,
         float pre_norm_eps)
-      : ctx_(ctx), residual_(residual), pre_norm_gamma_(pre_norm_gamma),
-        pre_norm_eps_(pre_norm_eps) {}
+    : ctx_(ctx), residual_(residual), pre_norm_gamma_(pre_norm_gamma),
+      pre_norm_eps_(pre_norm_eps) {}
   virtual ~Layer() = default;
   std::string name;
   ggml_tensor *operator()(ggml_tensor *x) const {
@@ -41,7 +44,6 @@ public:
                     pre_norm_gamma_);
       ggml_set_name(in, (name + "-norm").c_str());
     }
-    //TODO GGML tensor names are not set properly. THe -norm tensor is named as out and The name for out should be -residual as the attn layer has residual enabled
     ggml_tensor *out = forward(in);
     ggml_set_name(out, (name + "-out").c_str());
     if (residual_) {
@@ -51,6 +53,7 @@ public:
     return out;
   }
   void set_residual(bool v) { residual_ = v; }
+  void set_graph(ggml_cgraph *gf) { gf_ = gf; }
 };
 
 struct token_embedding_params_t {
@@ -84,6 +87,7 @@ public:
 };
 
 struct grouped_attn_head_params {
+  int block_id;
   ggml_context *ctx;
   ggml_tensor *q_w, *k_w, *q_b, *k_b, *v_w, *v_b, *out_w, *out_b;
   float rope_freq_base;
@@ -96,17 +100,22 @@ struct grouped_attn_head_params {
   bool residual;
   ggml_tensor *norm_gamma;
   float norm_eps;
+  int layer_index;
   bool debug = false;
+  KVCache* cache;
 };
 
 class GroupedAttentionHead : public Layer {
 private:
+  int block_id_;
   ggml_tensor *q_w_, *q_b_, *k_w_, *k_b_, *v_w_, *v_b_, *out_w_, *out_b_;
   bool apply_rope_;
   float rope_freq_base_;
   uint32_t n_heads_, n_kv_;
   int past_tokens_, len_;
   bool debug_;
+  int layer_index_;
+  KVCache* cache_;
 
 public:
   GroupedAttentionHead(grouped_attn_head_params);

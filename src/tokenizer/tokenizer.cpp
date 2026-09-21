@@ -1,11 +1,11 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <iostream>
 #include <ostream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #define PCRE2_CODE_UNIT_WIDTH 8
@@ -100,11 +100,13 @@ void zinferlm::Tokenizer::init_pretokenize_() {
 
 zinferlm::Tokenizer zinferlm::Tokenizer::for_model(zinferlm::Model &model) {
   tokenizer_info_t info = model.tokenizer_info();
-  zinferlm::Tokenizer obj = Tokenizer(info.model, info.pre, info.tokens);
+  zinferlm::Tokenizer obj =
+      Tokenizer(info.model, info.pre, info.tokens, info.token_type);
   obj.init_pretokenize_();
   obj.build_byte_to_unicode_map_();
   obj.build_token_id_map_();
   obj.build_merges_map_(info.merges);
+  obj.spl_token_trie_.build_from_tokens(info.tokens, info.token_type);
   return obj;
 }
 
@@ -151,7 +153,6 @@ zinferlm::Tokenizer::split_and_merge_(std::string chunk) {
     for (int i = 0; i < tokens.size() - 1; i++) {
       auto rank = merges_map_.find(tokens[i] + " " + tokens[i + 1]);
       if (rank != merges_map_.end()) {
-        std::cout << "Found merge" << std::endl;
         rank_pairs.push_back(std::make_pair(i, rank->second));
       }
     }
@@ -194,40 +195,39 @@ std::string zinferlm::Tokenizer::unicode_to_chars_(std::string token) const {
   return out;
 }
 
+void zinferlm::Tokenizer::bpe_(std::string text,
+                               std::vector<std::string> &tokens) {
+  std::vector<std::string> chunks = pretokenize(text);
+  for (auto c : chunks) {
+    std::vector<std::string> splitted_tokens = split_and_merge_(c);
+    tokens.insert(tokens.end(), splitted_tokens.begin(), splitted_tokens.end());
+  }
+}
+
 std::vector<int32_t> zinferlm::Tokenizer::tokenize(std::string text) {
   std::vector<std::string> final_tokens;
-  std::vector<std::string> chunks = pretokenize(text);
-  std::cout << "[Pretokenize] tokens:\n";
-  for (auto s : chunks) {
-    std::cout << s << " ";
-  }
-  std::cout << std::endl;
-  for (auto c : chunks) {
-    std::vector<std::string> tokens = split_and_merge_(c);
-    final_tokens.insert(final_tokens.end(), tokens.begin(), tokens.end());
-  }
   std::vector<int32_t> token_list;
+  int start = 0;
+  std::string pretext = "";
+  while (start < text.size()) {
+    int token_id = spl_token_trie_.match(text, start, text.size());
+    if (token_id >= 0) {
+      std::string spl_token = id_to_token_map_[token_id];
+      bpe_(pretext, final_tokens);
+      pretext = "";
+      final_tokens.push_back(spl_token);
+      start += spl_token.size();
+      continue;
+    }
+    pretext += text[start];
+    start++;
+  }
+  if (pretext.size() > 0) {
+    bpe_(pretext, final_tokens);
+  }
   for (auto t : final_tokens) {
     token_list.push_back(token_to_id_map_[t]);
   }
-
-  std::cout << "[Tokenizer] Input: \"" << text << "\"" << std::endl;
-  std::cout << "[Tokenizer] Token count: " << token_list.size() << std::endl;
-  std::cout << "[Tokenizer] Token IDs: [";
-  for (size_t i = 0; i < token_list.size(); i++) {
-    std::cout << token_list[i];
-    if (i < token_list.size() - 1)
-      std::cout << ", ";
-  }
-  std::cout << "]" << std::endl;
-  std::cout << "[Tokenizer] Decoded tokens: [";
-  for (size_t i = 0; i < token_list.size(); i++) {
-    std::cout << "\"" << decode(token_list[i]) << "\"";
-    if (i < token_list.size() - 1)
-      std::cout << ", ";
-  }
-  std::cout << "]" << std::endl;
-
   return token_list;
 }
 
@@ -237,4 +237,13 @@ std::string zinferlm::Tokenizer::decode(uint32_t token_id) const {
     return unicode_to_chars_(it->second);
   }
   return "";
+}
+
+bool zinferlm::Tokenizer::is_stop_token(std::string token) {
+  if (stop_tokens_.contains(token)) {
+    if (token_to_id_map_.find(token) != token_to_id_map_.end()) {
+      return true;
+    }
+  }
+  return false;
 }

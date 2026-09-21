@@ -22,9 +22,11 @@ private:
     bool debug_mode_ = false;
 
 public:
-    Graph(ggml_context *c, std::vector<Layer *> l);
+    Graph(ggml_context *c);
+    void set_layers(std::vector<Layer*> layers);
     ggml_cgraph *build(uint32_t n_tokens);
     ggml_tensor *execute(std::vector<int32_t> input);
+    ggml_backend* get_backend();
     
     void set_debug_mode(bool enabled) { debug_mode_ = enabled; }
 };

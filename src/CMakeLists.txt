@@ -1,16 +1,17 @@
-add_library(zinferlm ../include/zinferlm/models.h ../include/zinferlm/tokenizer.h ../include/zinferlm/inference.h
+add_library(zinferlm ../include/zinferlm/models.h ../include/zinferlm/tokenizer.h ../include/zinferlm/chat.h
     ./model_loader/gguf/gguf.h ./model_loader/gguf/gguf.cpp 
     ./model_loader/gguf/metadata.cpp ./model_loader/gguf/metadata.h
     ./model_loader/gguf/tensors.cpp ./model_loader/gguf/tensors.h
     ./tokenizer/tokenizer.cpp ./tokenizer/tokenizer.h
+    ./tokenizer/special_token_vocab.cpp
     ./engine/graph.cpp ./engine/graph.h
     ./engine/tensors.cpp ./engine/tensors.h
     ./layers/layers.h ./layers/token_emb.cpp ./layers/token_unemb.cpp
     ./layers/block.cpp ./layers/grouped_attn.cpp ./layers/swiglu.cpp
+    ./kv_cache/cache.h ./kv_cache/cache.cpp
     ./sampling/samplers.h ./sampling/samplers.cpp 
     ./models/qwen/model.cpp ./models/qwen/model.h
     ./models/models.cpp
-    ./inference/inference.cpp
 )
 
 find_package(PkgConfig REQUIRED)

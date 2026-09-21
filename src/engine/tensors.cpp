@@ -5,12 +5,13 @@
 #include <vector>
 
 #include "tensors.h"
+#include "zinferlm/models.h"
 
-ggml_tensor *create_tensor(ggml_context *ctx, std::string name, ggml_type type,
-                           void *data, std::vector<uint64_t> dims) {
-  ggml_tensor *t = ggml_new_tensor(ctx, type, dims.size(),
-                                   reinterpret_cast<int64_t *>(dims.data()));
-  t->data = data;
-  ggml_set_name(t, name.c_str());
+ggml_tensor *create_tensor(ggml_context *ctx, zinferlm::tensor_info_t info) {
+  ggml_tensor *t =
+      ggml_new_tensor(ctx, static_cast<ggml_type>(info.type_id), info.n_dim,
+                      reinterpret_cast<int64_t *>(info.dimensions.data()));
+  t->data = info.data;
+  ggml_set_name(t, info.name.c_str());
   return t;
 }

@@ -1,4 +1,3 @@
-#include "zinferlm/inference.h"
 #include <csignal>
 #include <iostream>
 #include <string>
@@ -71,8 +70,7 @@ int main(int argc, char *argv[])
       }
       continue;
     }
-    zinferlm::Inference infer;
-    std::string output = infer.invoke(input);
+    std::string output = model.invoke(input, 256);
     std::cout << output << std::endl;
   }
 

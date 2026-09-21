@@ -163,14 +163,17 @@ ggml_context_ptr init_engine(uint64_t n_op_estimate) {
   return ggml_context_ptr{ggml_init(params)};
 }
 
-Graph::Graph(ggml_context *c, std::vector<Layer *> l) : ctx_(c), layers_(l) {
+Graph::Graph(ggml_context *c) : ctx_(c) {
   backend_ = ggml_backend_ptr{ggml_backend_cpu_init()};
-  
-  // Create scheduler with the backend
+
   ggml_backend_t backends[] = {backend_.get()};
   sched_ = ggml_backend_sched_ptr{
       ggml_backend_sched_new(backends, nullptr, 1, 16384, false, true)};
-};
+}
+
+void Graph::set_layers(std::vector<Layer*> layers) {
+  layers_ = layers;
+}
 
 ggml_cgraph *Graph::build(uint32_t input_size) {
   ggml_cgraph *gf = ggml_new_graph(ctx_);
@@ -180,6 +183,7 @@ ggml_cgraph *Graph::build(uint32_t input_size) {
   ggml_tensor *current = input_;
 
   for (size_t i = 0; i < layers_.size(); i++) {
+    layers_[i]->set_graph(gf);
     current = (*layers_[i])(current);
   }
   output_ = current;
@@ -202,6 +206,13 @@ ggml_tensor *Graph::execute(std::vector<int32_t> input) {
   ggml_backend_sched_alloc_graph(sched_.get(), gf);
   
   // Set input tensor
+  if (debug_mode_) {
+    std::cout << "Input Tokens: [ ";
+    for (auto t: input)
+      std::cout << t << ", ";
+    std::cout << " ]\n";
+  }
+
   ggml_backend_tensor_set(input_, input.data(), 0,
                           input.size() * sizeof(int32_t));
 
@@ -231,4 +242,8 @@ ggml_tensor *Graph::execute(std::vector<int32_t> input) {
   }
 
   return output_;
+}
+
+ggml_backend* Graph::get_backend() {
+  return backend_.get();
 }

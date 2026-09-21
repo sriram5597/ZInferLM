@@ -9,12 +9,13 @@
 
 GroupedAttentionHead::GroupedAttentionHead(grouped_attn_head_params params)
     : Layer(params.ctx, params.residual, params.norm_gamma, params.norm_eps),
-      q_w_(params.q_w), q_b_(params.q_b), k_w_(params.k_w), k_b_(params.k_b),
-      v_w_(params.v_w), v_b_(params.v_b), out_w_(params.out_w),
-      out_b_(params.out_b), rope_freq_base_(params.rope_freq_base),
-      apply_rope_(params.apply_rope), n_heads_(params.n_heads),
-      n_kv_(params.n_kv), past_tokens_(params.past_tokens), len_(params.len),
-      debug_(params.debug) {
+      block_id_(params.block_id), q_w_(params.q_w), q_b_(params.q_b),
+      k_w_(params.k_w), k_b_(params.k_b), v_w_(params.v_w), v_b_(params.v_b),
+      out_w_(params.out_w), out_b_(params.out_b),
+      rope_freq_base_(params.rope_freq_base), apply_rope_(params.apply_rope),
+      n_heads_(params.n_heads), n_kv_(params.n_kv),
+      past_tokens_(params.past_tokens), len_(params.len), debug_(params.debug),
+      layer_index_(params.layer_index), cache_(params.cache) {
   name = "GroupedAttention";
 }
 
@@ -64,8 +65,15 @@ ggml_tensor *GroupedAttentionHead::forward(ggml_tensor *x) const {
   K_cur = ggml_cont(ctx_, ggml_permute(ctx_, K_cur, 0, 2, 1, 3));
   V_cur = ggml_cont(ctx_, ggml_permute(ctx_, V_cur, 0, 2, 1, 3));
   Q_cur = ggml_cont(ctx_, ggml_permute(ctx_, Q_cur, 0, 2, 1, 3));
+
+  cache_->set_graph(gf_);
+  cache_->concat(ctx_, block_id_, len_, K_cur, V_cur);
+  layer_kv_cache_t cached_entry = cache_->get_slice(ctx_, block_id_);
+  K_cur = cached_entry.K;
+  V_cur = cached_entry.V;
+
   struct ggml_tensor *mask_f32 =
-      ggml_new_tensor_2d(ctx_, GGML_TYPE_F32, len_, len_);
+      ggml_new_tensor_2d(ctx_, GGML_TYPE_F32, past_tokens_ + len_, past_tokens_ + len_);
   mask_f32 = ggml_scale(ctx_, mask_f32, 0.0f);
   mask_f32 = ggml_diag_mask_inf(ctx_, mask_f32, past_tokens_);
   ggml_set_name(mask_f32, "mask_f32");
@@ -111,7 +119,7 @@ ggml_tensor *GroupedAttentionHead::forward(ggml_tensor *x) const {
   // ggml_set_name(KQV, "kqv");
   //
   // // Permute back to [d_head, n_heads, seq_len]
-  KQV =ggml_reshape_2d(ctx_, KQV, x->ne[0], x->ne[1]);
+  KQV = ggml_reshape_2d(ctx_, KQV, x->ne[0], x->ne[1]);
 
   // Output projection
   ggml_tensor *attn_out = ggml_mul_mat(ctx_, out_w_, KQV);
