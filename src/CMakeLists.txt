@@ -1,5 +1,5 @@
 add_library(zinferlm ../include/zinferlm/models.h ../include/zinferlm/tokenizer.h ../include/zinferlm/chat.h
-    ../include/zinferlm/events.h
+    ../include/zinferlm/events.h ../include/zinferlm/metrics.h
     ./model_loader/gguf/gguf.h ./model_loader/gguf/gguf.cpp 
     ./model_loader/gguf/metadata.cpp ./model_loader/gguf/metadata.h
     ./model_loader/gguf/tensors.cpp ./model_loader/gguf/tensors.h
@@ -11,7 +11,7 @@ add_library(zinferlm ../include/zinferlm/models.h ../include/zinferlm/tokenizer.
     ./layers/block.cpp ./layers/grouped_attn.cpp ./layers/swiglu.cpp
     ./kv_cache/cache.h ./kv_cache/cache.cpp
     ./chat/chat_message.h ./chat/chat_message.cpp
-    ./chat/chat.cpp
+    ./chat/chat.cpp ./metrics/metrics.cpp
     ./events/events.cpp
     ./sampling/samplers.h ./sampling/samplers.cpp 
     ./models/qwen/model.cpp ./models/qwen/model.h

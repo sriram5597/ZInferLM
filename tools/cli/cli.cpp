@@ -3,11 +3,13 @@
 #include <csignal>
 #include <cstdlib>
 #include <iostream>
+#include <set>
 #include <string>
 #include <string_view>
 #include <variant>
 #include <vector>
 #include <zinferlm/models.h>
+#include <zinferlm/metrics.h>
 #include <zinferlm/tokenizer.h>
 
 std::function<void()> cleanup;
@@ -19,6 +21,8 @@ static void sigint_handler(int) {
   }
   _exit(0);
 }
+
+using ModelEvent = zinferlm::events::ModelEvent;
 
 int main(int argc, char *argv[]) {
   if (argc < 2) {
@@ -42,7 +46,10 @@ int main(int argc, char *argv[]) {
   std::cout << "Architecture: " << m_info.architecture << std::endl;
   std::cout << "File Type: " << m_info.file_type << std::endl;
 
-  zinferlm::events::model_event_listener_t handler =
+  zinferlm::metrics::LLMMetricsCollector metrics_collector;
+  metrics_collector.collect();
+
+  zinferlm::events::event_callback_t cb =
       [](zinferlm::events::model_event_t event) -> void {
     if (auto generated_event =
             std::get_if<zinferlm::events::token_generated_event_t>(&event)) {
@@ -68,17 +75,11 @@ int main(int argc, char *argv[]) {
   zinferlm::events::EventDispatcher &dispatcher =
       zinferlm::events::EventDispatcher::get_instance();
 
-  int stream_listener_id =
-      dispatcher.listen(zinferlm::events::ModelEvent::TOKEN_GENERATED, handler);
-  int status_listener_id = dispatcher.listen(
-      zinferlm::events::ModelEvent::GENERATION_COMPLETED, handler);
-
-  cleanup = [&dispatcher, stream_listener_id,
-             status_listener_id]() -> void {
-    dispatcher.unlisten(zinferlm::events::ModelEvent::TOKEN_GENERATED,
-                        stream_listener_id);
-    dispatcher.unlisten(zinferlm::events::ModelEvent::GENERATION_COMPLETED,
-                        stream_listener_id);
+  std::set<ModelEvent> events = {ModelEvent::GENERATION_COMPLETED,
+                                 ModelEvent::TOKEN_GENERATED};
+  int observer_id = dispatcher.listen(cb, events);
+  cleanup = [&dispatcher, observer_id]() -> void {
+    dispatcher.unlisten(observer_id);
   };
 
   std::cout << "\nEnter a prompt (Ctrl+C to exit):\n";
@@ -110,6 +111,9 @@ int main(int argc, char *argv[]) {
     // model.set_stream(handler);
     zinferlm::Chat chat(model);
     chat.invoke(input);
+    zinferlm::metrics::model_metrics_t metrics = metrics_collector.get_metrics(); 
+    std::cout << "\033[35m" << "Prefill Latency (ms): " << metrics.prefill_latency << "\033[0m" << std::endl;
+    metrics_collector.reset();
   }
 
   return 0;

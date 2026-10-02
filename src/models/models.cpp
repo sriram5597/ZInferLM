@@ -91,10 +91,20 @@ std::string zinferlm::Model::invoke(std::string input, int max_tokens) {
   int past_tokens = 0;
   int i = 0;
   for (; i < max_tokens; i++) {
+    if (past_tokens == 0) {
+      events::prefill_start_event_t p_start;
+      p_start.tokens_count = tokens.size();
+      dispatcher.dispatch(ModelEvent::PREFILL_STARTED, p_start);
+    }
     std::vector<float> logits = this->predict(tokens, past_tokens);
     sampler_params_t params = {.temperature = 0.2f, .top_k = 0};
     Sampler sampler(params);
     std::pair<uint64_t, float> sample = sampler.sample(logits);
+    if (past_tokens == 0) {
+      events::prefill_end_event_t p_end;
+      p_end.tokens_count = tokens.size();
+      dispatcher.dispatch(ModelEvent::PREFILL_COMPLETED, p_end);
+    }
     past_tokens += tokens.size();
     tokens.clear();
     tokens.push_back(sample.first);
@@ -121,4 +131,3 @@ std::string zinferlm::Model::invoke(std::string input, int max_tokens) {
   }
   return output;
 }
-
