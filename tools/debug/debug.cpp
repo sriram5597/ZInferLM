@@ -1,3 +1,4 @@
+#include "zinferlm/chat.h"
 #include <iostream>
 #include <string>
 #include <zinferlm/models.h>
@@ -20,7 +21,8 @@ int main(int argc, char *argv[]) {
   auto &model = zinferlm::Model::instance();
   model.set_debug(true);
 
-  std::string output = model.invoke("<|im_start|>Hi", 1);
+  zinferlm::Chat chat(model);
+  std::string output = chat.invoke("<|im_start|>User\nHi<|im_end|>");
   std::cout << output << std::endl;
 
   return 0;

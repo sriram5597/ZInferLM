@@ -107,6 +107,7 @@ zinferlm::Tokenizer zinferlm::Tokenizer::for_model(zinferlm::Model &model) {
   obj.build_token_id_map_();
   obj.build_merges_map_(info.merges);
   obj.spl_token_trie_.build_from_tokens(info.tokens, info.token_type);
+  obj.info_ = info;
   return obj;
 }
 
@@ -246,4 +247,20 @@ bool zinferlm::Tokenizer::is_stop_token(std::string token) {
     }
   }
   return false;
+}
+
+std::string zinferlm::Tokenizer::get_bos() {
+  auto it = id_to_token_map_.find(info_.bos_token_id);
+  if (it != id_to_token_map_.end()) {
+    return it->second;
+  }
+  return "";
+}
+
+std::string zinferlm::Tokenizer::get_eos() {
+  auto it = id_to_token_map_.find(info_.bos_token_id);
+  if (it != id_to_token_map_.end()) {
+    return it->second;
+  }
+  return "";
 }

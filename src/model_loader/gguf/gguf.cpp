@@ -99,6 +99,7 @@ zinferlm::model_config_t GGUFLoader::model_config() const {
   config.embedding_dim = get_metadata("qwen2.embedding_length")->value<uint32_t>();
   config.n_blocks = get_metadata("qwen2.block_count")->value<uint32_t>();
   config.rms_eps = get_metadata("qwen2.attention.layer_norm_rms_epsilon")->value<float>();
+  config.max_context_len = get_metadata("qwen2.context_length")->value<uint32_t>();
   return config;
 }
 
@@ -141,6 +142,7 @@ zinferlm::tokenizer_info_t GGUFLoader::tokenizer_info() const
   t_info.eos_token_id = get_metadata("tokenizer.ggml.eos_token_id")->value<uint32_t>();
   t_info.padding_token_id = get_metadata("tokenizer.ggml.padding_token_id")->value<uint32_t>();
   t_info.add_bos_token = get_metadata("tokenizer.ggml.add_bos_token")->value<bool>();
+  t_info.template_str = get_metadata("tokenizer.chat_template")->val_string();
 
   return t_info;
 }

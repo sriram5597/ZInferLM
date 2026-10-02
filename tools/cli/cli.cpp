@@ -1,20 +1,27 @@
+#include "zinferlm/chat.h"
+#include "zinferlm/events.h"
 #include <csignal>
+#include <cstdlib>
 #include <iostream>
 #include <string>
+#include <string_view>
+#include <variant>
 #include <vector>
 #include <zinferlm/models.h>
 #include <zinferlm/tokenizer.h>
 
-static void sigint_handler(int)
-{
+std::function<void()> cleanup;
+
+static void sigint_handler(int) {
   std::cout << "\n";
+  if (cleanup) {
+    cleanup();
+  }
   _exit(0);
 }
 
-int main(int argc, char *argv[])
-{
-  if (argc < 2)
-  {
+int main(int argc, char *argv[]) {
+  if (argc < 2) {
     std::cerr << "Usage: " << argv[0] << " <model_path>\n";
     return 1;
   }
@@ -22,8 +29,7 @@ int main(int argc, char *argv[])
   std::string model_path = argv[1];
 
   auto is_loaded = zinferlm::Model::load(model_path.c_str());
-  if (!is_loaded)
-  {
+  if (!is_loaded) {
     std::cerr << "Failed to load model: " << model_path << "\n";
     return 1;
   }
@@ -36,42 +42,74 @@ int main(int argc, char *argv[])
   std::cout << "Architecture: " << m_info.architecture << std::endl;
   std::cout << "File Type: " << m_info.file_type << std::endl;
 
-  std::signal(SIGINT, sigint_handler);
+  zinferlm::events::model_event_listener_t handler =
+      [](zinferlm::events::model_event_t event) -> void {
+    if (auto generated_event =
+            std::get_if<zinferlm::events::token_generated_event_t>(&event)) {
+      std::cout << "\033[33m" << generated_event->token;
+      std::cout.flush();
+    }
+    if (auto completed_event =
+            std::get_if<zinferlm::events::generation_completed_event_t>(
+                &event)) {
+      zinferlm::StreamStatus status = completed_event->status;
+      if (status == zinferlm::StreamStatus::MAX_CTX_REACHED) {
+        std::cout << "\nMaximum Context Reached\n";
+        std::cout.flush();
+      }
+      if (status == zinferlm::StreamStatus::EOS) {
+        std::cout << std::endl;
+        std::cout.flush();
+      }
+      std::cout << "\033[0m";
+    }
+  };
+
+  zinferlm::events::EventDispatcher &dispatcher =
+      zinferlm::events::EventDispatcher::get_instance();
+
+  int stream_listener_id =
+      dispatcher.listen(zinferlm::events::ModelEvent::TOKEN_GENERATED, handler);
+  int status_listener_id = dispatcher.listen(
+      zinferlm::events::ModelEvent::GENERATION_COMPLETED, handler);
+
+  cleanup = [&dispatcher, stream_listener_id,
+             status_listener_id]() -> void {
+    dispatcher.unlisten(zinferlm::events::ModelEvent::TOKEN_GENERATED,
+                        stream_listener_id);
+    dispatcher.unlisten(zinferlm::events::ModelEvent::GENERATION_COMPLETED,
+                        stream_listener_id);
+  };
 
   std::cout << "\nEnter a prompt (Ctrl+C to exit):\n";
   std::string input;
-  while (true)
-  {
+  while (true) {
     std::cout << "> " << std::flush;
     if (!std::getline(std::cin, input))
       break;
     if (input.empty())
       continue;
-    if (input[0] == '/')
-    {
+    if (input[0] == '/') {
       size_t space = input.find(' ');
       std::string cmd = input.substr(0, space);
-      std::string args = (space != std::string::npos) ? input.substr(space + 1) : "";
-      if (cmd == "/tokenize")
-      {
+      std::string args =
+          (space != std::string::npos) ? input.substr(space + 1) : "";
+      if (cmd == "/tokenize") {
         zinferlm::Tokenizer tokenizer = zinferlm::Tokenizer::for_model(model);
         auto tokens = tokenizer.tokenize(args);
         for (auto &t : tokens)
           std::cout << t << " ";
         std::cout << std::endl;
-      }
-      else if (cmd == "/graph")
-      {
+      } else if (cmd == "/graph") {
         model.summary();
-      }
-      else
-      {
+      } else {
         std::cout << "Unknown command: " << cmd << std::endl;
       }
       continue;
     }
-    std::string output = model.invoke(input, 256);
-    std::cout << output << std::endl;
+    // model.set_stream(handler);
+    zinferlm::Chat chat(model);
+    chat.invoke(input);
   }
 
   return 0;

@@ -50,6 +50,7 @@ private:
   using Pcre2DataPtr =
       std::unique_ptr<pcre2_match_data, decltype(&pcre2_match_data_free)>;
 
+  zinferlm::tokenizer_info_t info_;
   std::string model_;
   std::string pre_;
   std::unordered_map<std::string, uint64_t> merges_map_;
@@ -100,5 +101,7 @@ public:
   std::vector<int32_t> tokenize(std::string text);
   std::string decode(uint32_t token_id) const;
   bool is_stop_token(std::string token);
+  std::string get_bos();
+  std::string get_eos();
 };
 }; // namespace zinferlm

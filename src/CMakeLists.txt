@@ -1,4 +1,5 @@
 add_library(zinferlm ../include/zinferlm/models.h ../include/zinferlm/tokenizer.h ../include/zinferlm/chat.h
+    ../include/zinferlm/events.h
     ./model_loader/gguf/gguf.h ./model_loader/gguf/gguf.cpp 
     ./model_loader/gguf/metadata.cpp ./model_loader/gguf/metadata.h
     ./model_loader/gguf/tensors.cpp ./model_loader/gguf/tensors.h
@@ -9,6 +10,9 @@ add_library(zinferlm ../include/zinferlm/models.h ../include/zinferlm/tokenizer.
     ./layers/layers.h ./layers/token_emb.cpp ./layers/token_unemb.cpp
     ./layers/block.cpp ./layers/grouped_attn.cpp ./layers/swiglu.cpp
     ./kv_cache/cache.h ./kv_cache/cache.cpp
+    ./chat/chat_message.h ./chat/chat_message.cpp
+    ./chat/chat.cpp
+    ./events/events.cpp
     ./sampling/samplers.h ./sampling/samplers.cpp 
     ./models/qwen/model.cpp ./models/qwen/model.h
     ./models/models.cpp
@@ -32,7 +36,29 @@ if (NOT PCRE2_FOUND)
                         "  Windows:      vcpkg install pcre2")
 endif()
 
-target_link_libraries(zinferlm PRIVATE ${PCRE2_LIBRARIES} ggml)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(MINJA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(MINJA_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+set(MINJA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(MINJA_TEST_ENABLED OFF CACHE BOOL "" FORCE)
+include(FetchContent)
+
+FetchContent_Declare(
+  json
+  GIT_REPOSITORY https://github.com/nlohmann/json
+  GIT_TAG v3.12.0
+)
+FetchContent_MakeAvailable(json)
+
+
+FetchContent_Declare(
+  minja
+  GIT_REPOSITORY https://github.com/google/minja
+  GIT_TAG main
+)
+FetchContent_MakeAvailable(minja)
+
+target_link_libraries(zinferlm PRIVATE ${PCRE2_LIBRARIES} minja ggml)
 
 target_include_directories(zinferlm PRIVATE . ${PCRE2_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/ggml/include)
 target_include_directories(zinferlm PUBLIC ../include)
