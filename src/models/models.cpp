@@ -58,7 +58,7 @@ std::vector<float> zinferlm::Model::predict(std::vector<int32_t> tokens,
 
   if (!cache_) {
     cache_ = std::make_unique<KVCache>(
-        ggml_backend_get_default_buffer_type(graph.get_backend()), 1024,
+        ggml_backend_get_default_buffer_type(graph.get_backend()), cfg.max_context_len,
         cfg.n_blocks, cfg.nkv, cfg.embedding_dim / cfg.nheads, GGML_TYPE_F16);
   }
 
@@ -87,7 +87,15 @@ std::string zinferlm::Model::invoke(std::string input, int max_tokens) {
   EventDispatcher &dispatcher = EventDispatcher::get_instance();
   zinferlm::Tokenizer tokenizer = zinferlm::Tokenizer::for_model(*this);
   std::string output = "";
+  dispatcher.dispatch(ModelEvent::TOKENIZER_STARTED,
+                      events::tokenizer_started_event_t{
+                          .str_len = input.length(),
+                      });
   std::vector<int32_t> tokens = tokenizer.tokenize(input);
+  dispatcher.dispatch(ModelEvent::TOKENIZER_COMPLETED,
+                      events::tokenizer_completed_event_t{
+                          .num_tokens = tokens.size(),
+                      });
   int past_tokens = 0;
   int i = 0;
   for (; i < max_tokens; i++) {
@@ -97,14 +105,15 @@ std::string zinferlm::Model::invoke(std::string input, int max_tokens) {
       dispatcher.dispatch(ModelEvent::PREFILL_STARTED, p_start);
     }
     std::vector<float> logits = this->predict(tokens, past_tokens);
-    sampler_params_t params = {.temperature = 0.2f, .top_k = 0};
-    Sampler sampler(params);
-    std::pair<uint64_t, float> sample = sampler.sample(logits);
     if (past_tokens == 0) {
       events::prefill_end_event_t p_end;
       p_end.tokens_count = tokens.size();
       dispatcher.dispatch(ModelEvent::PREFILL_COMPLETED, p_end);
     }
+
+    sampler_params_t params = {.temperature = 0.2f, .top_k = 0};
+    Sampler sampler(params);
+    std::pair<uint64_t, float> sample = sampler.sample(logits);
     past_tokens += tokens.size();
     tokens.clear();
     tokens.push_back(sample.first);
@@ -114,7 +123,8 @@ std::string zinferlm::Model::invoke(std::string input, int max_tokens) {
     if (tokenizer.is_stop_token(out_token)) {
       dispatcher.dispatch(ModelEvent::GENERATION_COMPLETED,
                           zinferlm::events::generation_completed_event_t{
-                              .status = StreamStatus::EOS});
+                              .status = StreamStatus::EOS,
+                              .num_tokens = static_cast<uint32_t>(i)});
 
       break;
     }

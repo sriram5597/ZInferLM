@@ -8,8 +8,8 @@
 #include <string_view>
 #include <variant>
 #include <vector>
-#include <zinferlm/models.h>
 #include <zinferlm/metrics.h>
+#include <zinferlm/models.h>
 #include <zinferlm/tokenizer.h>
 
 std::function<void()> cleanup;
@@ -82,6 +82,8 @@ int main(int argc, char *argv[]) {
     dispatcher.unlisten(observer_id);
   };
 
+  std::vector<zinferlm::ChatMessage> messages;
+
   std::cout << "\nEnter a prompt (Ctrl+C to exit):\n";
   std::string input;
   while (true) {
@@ -110,9 +112,20 @@ int main(int argc, char *argv[]) {
     }
     // model.set_stream(handler);
     zinferlm::Chat chat(model);
-    chat.invoke(input);
-    zinferlm::metrics::model_metrics_t metrics = metrics_collector.get_metrics(); 
-    std::cout << "\033[35m" << "Prefill Latency (ms): " << metrics.prefill_latency << "\033[0m" << std::endl;
+    zinferlm::UserMessage user_message = zinferlm::UserMessage(input);
+    messages.push_back(user_message);
+    zinferlm::ChatMessage out_msg = chat.invoke(messages);
+    messages.push_back(out_msg);
+    zinferlm::metrics::model_metrics_t metrics =
+        metrics_collector.get_metrics();
+    std::cout << "\033[35m"
+              << "Time-to-Frist-Token (ms): " << metrics.time_to_first_token
+              << " | Decode Time (ms): " << metrics.decode_time
+              << " | Total Time (ms): " << metrics.total_time
+              << " | Token/s: " << metrics.throughput_in_secs
+              << " | Input Tokens: " << metrics.inp_tokens
+              << " | Output Tokens: " << metrics.out_tokens << "\033[0m"
+              << std::endl;
     metrics_collector.reset();
   }
 

@@ -29,6 +29,6 @@ private:
 
 public:
   Chat(zinferlm::Model &m) : model_(m) {}
-  std::string invoke(std::string input);
+  ChatMessage invoke(std::vector<ChatMessage> &messages);
 };
 }; // namespace zinferlm
