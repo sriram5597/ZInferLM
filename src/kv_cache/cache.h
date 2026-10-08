@@ -23,7 +23,7 @@ class KVCache {
     ggml_backend_buffer_ptr buffer_;
 
   public:
-    KVCache(ggml_backend_buffer_type_t buf_type, int ctx_len, int layers, int n_kv, int d_head, ggml_type type);
+    KVCache(int ctx_len, int layers, int n_kv, int d_head, ggml_type type);
     void set_graph(ggml_cgraph *gf);
     void reset();
     void concat(ggml_context* context, int l, int seq_len, ggml_tensor* K, ggml_tensor* V);

@@ -159,7 +159,6 @@ std::vector<zinferlm::tensor_info_t> GGUFLoader::tensor_info() const
         .type_id = static_cast<uint32_t>(*t->dtype),
         .n_dim = *t->n_dimensions,
         .data_offset = *t->offset,
-        .data = get_tensor_ptr(*t->offset),
         .dimensions = t->dimensions});
   }
   return tinfo_list;
@@ -176,7 +175,6 @@ zinferlm::tensor_info_t GGUFLoader::tensor_info(std::string name) const {
         .type_id = static_cast<uint32_t>(*t->dtype),
         .n_dim = *t->n_dimensions,
         .data_offset = *t->offset,
-        .data=get_tensor_ptr(*t->offset),
         .dimensions = t->dimensions};
   }
   return zinferlm::tensor_info_t{};

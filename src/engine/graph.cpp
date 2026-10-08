@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -7,7 +8,13 @@
 #include <ggml-cpu.h>
 #include <ggml.h>
 #include <iostream>
+#include <ostream>
+#include <utility>
 #include <vector>
+
+#if defined(CUDA_ENABLED) && CUDA_ENABLED
+#include <ggml-cuda.h>
+#endif
 
 #include "debug.h"
 #include "graph.h"
@@ -22,12 +29,31 @@ ggml_context *Graph::init_context(uint64_t n_op_estimate) {
   return ctx_;
 }
 
-Graph::Graph() {
-  backend_ = ggml_backend_ptr{ggml_backend_cpu_init()};
+Backend Graph::get_backend_type() {
+  Backend backend_type = Backend::GGML_BACKEND_DEVICE_TYPE_CPU;
+#if defined(CUDA_ENABLED) && CUDA_ENABLED
+  backend_type = Backend::GGML_BACKEND_DEVICE_TYPE_GPU;
+#endif
+  return backend_type;
+}
 
-  ggml_backend_t backends[] = {backend_.get()};
-  sched_ = ggml_backend_sched_ptr{
-      ggml_backend_sched_new(backends, nullptr, 1, 16384, false, true)};
+Graph::Graph() {
+  ggml_backend_ptr cpu_backend = ggml_backend_ptr{ggml_backend_cpu_init()};
+  backends_.push_back(std::move(cpu_backend));
+#if defined(CUDA_ENABLED) && CUDA_ENABLED
+  if (get_backend_type() == Backend::GGML_BACKEND_DEVICE_TYPE_GPU) {
+    std::cout << "Using cuda backend.." << std::endl;
+    ggml_backend_ptr cuda_backend = ggml_backend_ptr{ggml_backend_cuda_init(0)};
+    backends_.insert(backends_.begin(), std::move(cuda_backend));
+  }
+#endif
+  std::vector<ggml_backend *> backend_ptrs;
+  for (auto &b : backends_) {
+    backend_ptrs.push_back(b.get());
+  }
+
+  sched_ = ggml_backend_sched_ptr{ggml_backend_sched_new(
+      backend_ptrs.data(), nullptr, backend_ptrs.size(), 16384, false, true)};
 }
 
 void Graph::set_layers(std::vector<Layer *> layers) { layers_ = layers; }
@@ -53,10 +79,23 @@ ggml_cgraph *Graph::build(uint32_t input_size) {
 ggml_tensor *Graph::execute(std::vector<int32_t> input) {
   ggml_cgraph *gf = build(input.size());
 
-  // Set up debug callback with layer tensors
-  DebugCallbackData cb_data = {debug_mode_, {}};
-  ggml_backend_sched_set_eval_callback(sched_.get(), debug_eval_callback,
-                                       &cb_data);
+  // Pin the token-ID input tensor to the primary backend. ggml places
+  // GGML_TENSOR_FLAG_INPUT tensors on the last (CPU) backend by default and
+  // inserts a host->device copy, but that copy path is unreliable across our
+  // repeated per-token graph rebuilds. Placing the input on the primary backend
+  // (the GPU when CUDA is enabled) writes token IDs directly into the buffer the
+  // embedding lookup kernel reads.
+  ggml_backend_sched_set_tensor_backend(sched_.get(), input_, backends_[0].get());
+
+  // Install the debug eval callback only when requested, and keep its state in a
+  // member so the scheduler never holds a dangling stack pointer.
+  if (debug_mode_) {
+    debug_cb_data_ = {debug_mode_, {}};
+    ggml_backend_sched_set_eval_callback(sched_.get(), debug_eval_callback,
+                                         &debug_cb_data_);
+  } else {
+    ggml_backend_sched_set_eval_callback(sched_.get(), nullptr, nullptr);
+  }
 
   // Reserve scheduler memory (MUST be before setting inputs)
   if (!ggml_backend_sched_reserve(sched_.get(), gf)) {
@@ -94,19 +133,10 @@ ggml_tensor *Graph::execute(std::vector<int32_t> input) {
   std::vector<float> all_logits(output_elements);
   ggml_backend_tensor_get(output_, all_logits.data(), 0,
                           output_elements * sizeof(float));
-  float max_val = all_logits[0];
-  int max_idx = 0;
-  for (int i = 1; i < all_logits.size(); i++) {
-    if (all_logits[i] > max_val) {
-      max_val = all_logits[i];
-      max_idx = i;
-    }
-  }
-
   return output_;
 }
 
-ggml_backend *Graph::get_backend() { return backend_.get(); }
+ggml_backend *Graph::get_backend() { return backends_[0].get(); }
 
 Graph &Graph::get_instance() {
   static Graph graph;

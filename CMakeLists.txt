@@ -20,6 +20,10 @@ option(BUILD_TOKENIZE "Build ZInferLM tokenize tool" ${BUILD_ALL})
 set(GGML_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GGML_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 
+if (GGML_CUDA)
+  set(CMAKE_CUDA_ARCHITECTURES "native")
+endif()
+
 add_subdirectory(ggml)
 add_subdirectory(src)
 

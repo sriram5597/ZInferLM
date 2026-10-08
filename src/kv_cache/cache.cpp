@@ -1,11 +1,12 @@
 #include "cache.h"
-#include "ggml-alloc.h"
+#include "engine/graph.h"
 #include "ggml-cpp.h"
 #include "ggml.h"
+#include "zinferlm/models.h"
 #include <string>
 
-KVCache::KVCache(ggml_backend_buffer_type_t buf_type, int ctx_len, int layers,
-                 int n_kv, int d_head, ggml_type type = GGML_TYPE_F16)
+KVCache::KVCache(int ctx_len, int layers, int n_kv, int d_head,
+                 ggml_type type = GGML_TYPE_F16)
     : layers_(layers), d_head_(d_head), n_kv_(n_kv) {
   size_t ctx_size = 2 * layers * ggml_tensor_overhead() + layers * 128;
   ggml_init_params params = {
@@ -22,27 +23,29 @@ KVCache::KVCache(ggml_backend_buffer_type_t buf_type, int ctx_len, int layers,
     ggml_set_name(layers_[i].K, ("cache_k_l" + std::to_string(i)).c_str());
     ggml_set_name(layers_[i].V, ("cache_v_l" + std::to_string(i)).c_str());
   }
-  buffer_ = ggml_backend_buffer_ptr{
-      ggml_backend_alloc_ctx_tensors_from_buft(ctx_kv_.get(), buf_type)};
+  buffer_ = ggml_backend_buffer_ptr{ggml_backend_alloc_ctx_tensors_from_buft(
+      ctx_kv_.get(), ggml_backend_get_default_buffer_type(
+                         Graph::get_instance().get_backend()))};
 }
 
 void KVCache::set_graph(ggml_cgraph *gf) { gf_ = gf; }
 
 void KVCache::reset() {
-  for (auto& layer : layers_) {
+  for (auto &layer : layers_) {
     layer.len = 0;
   }
 }
 
-void KVCache::concat(ggml_context* ctx, int l, int seq_len, ggml_tensor *K, ggml_tensor *V) {
+void KVCache::concat(ggml_context *ctx, int l, int seq_len, ggml_tensor *K,
+                     ggml_tensor *V) {
   layer_kv_cache_t &cache = layers_[l];
   size_t offset = cache.len * cache.K->nb[1];
   ggml_tensor *k_view =
-      ggml_view_4d(ctx, cache.K, d_head_, seq_len, n_kv_, 1,
-                   cache.K->nb[1], cache.K->nb[2], cache.K->nb[3], offset);
+      ggml_view_4d(ctx, cache.K, d_head_, seq_len, n_kv_, 1, cache.K->nb[1],
+                   cache.K->nb[2], cache.K->nb[3], offset);
   ggml_tensor *v_view =
-      ggml_view_4d(ctx, cache.V, d_head_, seq_len, n_kv_, 1,
-                   cache.V->nb[1], cache.V->nb[2], cache.V->nb[3], offset);
+      ggml_view_4d(ctx, cache.V, d_head_, seq_len, n_kv_, 1, cache.V->nb[1],
+                   cache.V->nb[2], cache.V->nb[3], offset);
   ggml_tensor *k_cpy = ggml_cpy(ctx, K, k_view);
   ggml_tensor *v_cpy = ggml_cpy(ctx, V, v_view);
   ggml_set_name(k_cpy, ("cpy_k_l" + std::to_string(l)).c_str());
@@ -52,7 +55,7 @@ void KVCache::concat(ggml_context* ctx, int l, int seq_len, ggml_tensor *K, ggml
   cache.len += seq_len;
 }
 
-layer_kv_cache_t KVCache::get_slice(ggml_context* graph_ctx, int l) {
+layer_kv_cache_t KVCache::get_slice(ggml_context *graph_ctx, int l) {
   layer_kv_cache_t cache = layers_[l];
   return {
       .K = ggml_view_4d(graph_ctx, cache.K, d_head_, cache.len, n_kv_, 1,

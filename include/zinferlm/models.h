@@ -50,7 +50,6 @@ struct tensor_info_t {
   uint32_t type_id;
   uint32_t n_dim;
   uint64_t data_offset;
-  void *data;
   std::vector<uint64_t> dimensions;
 };
 
@@ -101,6 +100,7 @@ protected:
   ggml_tensor *get_tensor_(std::string);
 
 private:
+  ggml_backend_buffer_ptr tensor_buffer_;
   static std::unique_ptr<Model> instance_;
 };
 } // namespace zinferlm

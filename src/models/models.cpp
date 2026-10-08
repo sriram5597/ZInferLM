@@ -6,6 +6,7 @@
 #include <ggml.h>
 #include <iostream>
 #include <memory>
+#include <ostream>
 #include <string_view>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -35,7 +36,8 @@ zinferlm::Model &zinferlm::Model::instance() {
 
 zinferlm::Model::Model(zinferlm::ModelLoader *loader)
     : loader_(std::unique_ptr<zinferlm::ModelLoader>{loader}) {
-  ggml_init_params params = {.mem_size = loader_->get_tensor_count() * ggml_tensor_overhead(),
+  ggml_init_params params = {.mem_size = loader_->get_tensor_count() *
+                                         ggml_tensor_overhead(),
                              .mem_buffer = nullptr,
                              .no_alloc = true};
   tensor_ctx_ = ggml_context_ptr{ggml_init(params)};
@@ -68,6 +70,24 @@ void zinferlm::Model::load_tensors_() {
   for (auto &t_info : loader_->tensor_info()) {
     ggml_tensor *t = create_tensor(tensor_ctx_.get(), t_info);
     tensor_map_[t_info.name] = t;
+  }
+  if (Graph::get_backend_type() == GGML_BACKEND_DEVICE_TYPE_GPU) {
+    std::cout << "setting buffer..." << std::endl;
+    tensor_buffer_ =
+        ggml_backend_buffer_ptr{ggml_backend_alloc_ctx_tensors_from_buft(
+            tensor_ctx_.get(), ggml_backend_get_default_buffer_type(
+                                   Graph::get_instance().get_backend()))};
+  }
+
+  for (auto &t_info : loader_->tensor_info()) {
+    ggml_tensor *t = get_tensor_(t_info.name);
+    if (Graph::get_backend_type() != GGML_BACKEND_DEVICE_TYPE_CPU) {
+      GGML_ASSERT(tensor_buffer_.get() != NULL && "tensor buffer not set");
+      ggml_backend_tensor_set(t, loader_->get_tensor_ptr(t_info.data_offset), 0,
+                              ggml_nbytes(t));
+    } else {
+      t->data = loader_->get_tensor_ptr(t_info.data_offset);
+    }
   }
 }
 
@@ -132,11 +152,9 @@ std::string zinferlm::Model::invoke(std::string input, int max_tokens) {
                       });
   int past_tokens = 0;
   model_config_t cfg = this->config();
-  Graph &graph = Graph::get_instance();
-  std::unique_ptr<KVCache> cache = std::make_unique<KVCache>(
-      ggml_backend_get_default_buffer_type(graph.get_backend()),
-      cfg.max_context_len, cfg.n_blocks, cfg.nkv,
-      cfg.embedding_dim / cfg.nheads, GGML_TYPE_F16);
+  std::unique_ptr<KVCache> cache =
+      std::make_unique<KVCache>(cfg.max_context_len, cfg.n_blocks, cfg.nkv,
+                                cfg.embedding_dim / cfg.nheads, GGML_TYPE_F16);
 
   int i = 0;
   for (; i < max_tokens; i++) {
