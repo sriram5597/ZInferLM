@@ -49,7 +49,7 @@ std::unordered_map<std::string, std::unique_ptr<TensorInfo>> gguf_tensors_info(c
   return tensors_map;
 }
 
-std::unique_ptr<GGUFLoader> load_gguf_file(int *fd, size_t file_size)
+GGUFLoader* load_gguf_file(int *fd, size_t file_size)
 {
   void *raw_map = mmap(nullptr, file_size, PROT_READ, MAP_PRIVATE, *fd, 0);
   if (raw_map == MAP_FAILED)
@@ -61,22 +61,22 @@ std::unique_ptr<GGUFLoader> load_gguf_file(int *fd, size_t file_size)
 
   const gguf_header_t *header = reinterpret_cast<const gguf_header_t *>(base_ptr);
 
-  GGUFLoader gguf;
-  gguf.header = header;
+  GGUFLoader* gguf = new GGUFLoader();
+  gguf->header = header;
 
   const char *cur = base_ptr + sizeof(gguf_header_t);
-  gguf.metadata = gguf_metadata(cur, header->metadata_kv_count);
-  gguf.tensors = gguf_tensors_info(cur, header->tensor_count);
-  gguf.set_tensor_base_ptr(cur);
+  gguf->metadata = gguf_metadata(cur, header->metadata_kv_count);
+  gguf->tensors = gguf_tensors_info(cur, header->tensor_count);
+  gguf->set_tensor_base_ptr(cur);
 
   auto unmap_deleter = [file_size](const char *ptr)
   {
     munmap(const_cast<char *>(ptr), file_size);
   };
-  gguf.set_mapped_memory(std::unique_ptr<const char, std::function<void(const char *)>>(
+  gguf->set_mapped_memory(std::unique_ptr<const char, std::function<void(const char *)>>(
       base_ptr, std::function<void(const char *)>(unmap_deleter)));
 
-  return std::make_unique<GGUFLoader>(std::move(gguf));
+  return gguf;
 }
 
 zinferlm::model_info_t GGUFLoader::info() const

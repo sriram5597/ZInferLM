@@ -7,7 +7,6 @@
 #include <unordered_map>
 #include <string_view>
 #include <zinferlm/models.h>
-#include "model_loader/loader.h"
 #include "metadata.h"
 #include "tensors.h"
 
@@ -99,7 +98,7 @@ struct gguf_header_t
 
 using metadata_map_t = std::unordered_map<std::string, std::unique_ptr<Metadata>>;
 
-class GGUFLoader : public ModelLoader
+class GGUFLoader : public zinferlm::ModelLoader
 {
 public:
   const gguf_header_t *header;
@@ -128,4 +127,4 @@ private:
 };
 
 bool is_gguf_file(int *);
-std::unique_ptr<GGUFLoader> load_gguf_file(int *, size_t);
+GGUFLoader* load_gguf_file(int *, size_t);

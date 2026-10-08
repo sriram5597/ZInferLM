@@ -7,7 +7,7 @@
 KVCache::KVCache(ggml_backend_buffer_type_t buf_type, int ctx_len, int layers,
                  int n_kv, int d_head, ggml_type type = GGML_TYPE_F16)
     : layers_(layers), d_head_(d_head), n_kv_(n_kv) {
-  size_t ctx_size = 2 * layers * ggml_tensor_overhead() + 4096;
+  size_t ctx_size = 2 * layers * ggml_tensor_overhead() + layers * 128;
   ggml_init_params params = {
       .mem_size = ctx_size,
       .mem_buffer = nullptr,

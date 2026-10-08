@@ -1,14 +1,14 @@
 #pragma once
 
 #include <cstdint>
-#include <functional>
+#include <ggml-backend.h>
+#include <ggml-cpp.h>
+#include <ggml.h>
 #include <memory>
 #include <string>
-#include <string_view>
+#include <unordered_map>
 #include <vector>
 
-struct ggml_context;
-struct ggml_backend;
 class Layer;
 class KVCache;
 class Graph;
@@ -54,26 +54,33 @@ struct tensor_info_t {
   std::vector<uint64_t> dimensions;
 };
 
-enum StreamStatus {
-  CONTINUE,
-  EOS,
-  MAX_CTX_REACHED
+class ModelLoader {
+public:
+  virtual zinferlm::model_info_t info() const = 0;
+  virtual zinferlm::tokenizer_info_t tokenizer_info() const = 0;
+  virtual std::vector<zinferlm::tensor_info_t> tensor_info() const = 0;
+  virtual void *get_tensor_ptr(uint64_t offset) const = 0;
+  virtual uint64_t get_tensor_count() const = 0;
+  virtual zinferlm::tensor_info_t tensor_info(std::string id) const = 0;
+  virtual zinferlm::model_config_t model_config() const = 0;
 };
+
+enum StreamStatus { CONTINUE, EOS, MAX_CTX_REACHED };
 
 class Model {
 public:
-  virtual ~Model() = default;
-  virtual model_info_t info() const = 0;
-  virtual tokenizer_info_t tokenizer_info() const = 0;
-  virtual std::vector<tensor_info_t> tensor_info() const = 0;
-  virtual model_config_t config() const = 0;
+  model_info_t info() const;
+  tokenizer_info_t tokenizer_info() const;
+  std::vector<tensor_info_t> tensor_info() const;
+  model_config_t config() const;
   virtual std::vector<std::unique_ptr<Layer>> create_layers(ggml_context *ctx,
                                                             int past_tokens,
                                                             int len,
                                                             KVCache *cache) = 0;
   virtual void summary() = 0;
 
-  std::vector<float> predict(std::vector<int32_t> tokens, int past_tokens);
+  std::vector<float> predict(std::vector<int32_t> tokens, int past_tokens,
+                             KVCache *cache);
 
   static Model &instance();
   static bool load(const char *model_path);
@@ -82,11 +89,16 @@ public:
   std::string invoke(std::string input, int max_tokens);
 
 protected:
-  Model() = default;
+  ggml_context_ptr tensor_ctx_;
+  std::unordered_map<std::string, ggml_tensor *> tensor_map_;
+  std::unique_ptr<ModelLoader> loader_;
+  Model(zinferlm::ModelLoader *loader);
   bool debug_ = false;
-  std::unique_ptr<KVCache> cache_;
   std::unique_ptr<ggml_backend, void (*)(ggml_backend *)> backend_{
       nullptr, [](ggml_backend *) {}};
+
+  void load_tensors_();
+  ggml_tensor *get_tensor_(std::string);
 
 private:
   static std::unique_ptr<Model> instance_;

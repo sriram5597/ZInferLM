@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20...3.25) 
 
-project("inferlm" C CXX)
+project("inferlm" LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,7 +21,6 @@ set(GGML_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GGML_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 
 add_subdirectory(ggml)
-
 add_subdirectory(src)
 
 if(BUILD_CLI)

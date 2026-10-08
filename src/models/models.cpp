@@ -1,6 +1,9 @@
 #include <cassert>
 #include <cstdint>
 #include <fcntl.h>
+#include <ggml-backend.h>
+#include <ggml-cpu.h>
+#include <ggml.h>
 #include <iostream>
 #include <memory>
 #include <string_view>
@@ -8,13 +11,12 @@
 #include <unistd.h>
 
 #include "engine/graph.h"
+#include "engine/tensors.h"
 #include "ggml-cpp.h"
 #include "kv_cache/cache.h"
 #include "model_loader/gguf/gguf.h"
 #include "qwen/model.h"
 #include "sampling/samplers.h"
-#include <ggml-cpu.h>
-#include <ggml.h>
 #include <zinferlm/events.h>
 #include <zinferlm/models.h>
 #include <zinferlm/tokenizer.h>
@@ -24,9 +26,20 @@ using ModelEvent = zinferlm::events::ModelEvent;
 
 static_assert(sizeof(struct ggml_tensor) > 0, "ggml integration check");
 
-std::unique_ptr<zinferlm::Model> zinferlm::Model::instance_;
+std::unique_ptr<zinferlm::Model> zinferlm::Model::instance_ = nullptr;
 
-zinferlm::Model &zinferlm::Model::instance() { return *instance_; }
+zinferlm::Model &zinferlm::Model::instance() {
+  assert(instance_ && "Model not loaded. Call load() first.");
+  return *instance_.get();
+}
+
+zinferlm::Model::Model(zinferlm::ModelLoader *loader)
+    : loader_(std::unique_ptr<zinferlm::ModelLoader>{loader}) {
+  ggml_init_params params = {.mem_size = loader_->get_tensor_count() * ggml_tensor_overhead(),
+                             .mem_buffer = nullptr,
+                             .no_alloc = true};
+  tensor_ctx_ = ggml_context_ptr{ggml_init(params)};
+}
 
 bool zinferlm::Model::load(const char *model_path) {
   int raw_fd = open(model_path, O_RDONLY);
@@ -43,30 +56,51 @@ bool zinferlm::Model::load(const char *model_path) {
   }
   size_t file_size = model_stats.st_size;
   if (is_gguf_file(&raw_fd)) {
-    std::unique_ptr<ModelLoader> f = load_gguf_file(&raw_fd, file_size);
-    instance_ = std::make_unique<QwenModel>(std::move(f));
+    ModelLoader *f = load_gguf_file(&raw_fd, file_size);
+    instance_ = std::make_unique<QwenModel>(f);
+    instance_->load_tensors_();
     return true;
   }
   return false;
 }
 
+void zinferlm::Model::load_tensors_() {
+  for (auto &t_info : loader_->tensor_info()) {
+    ggml_tensor *t = create_tensor(tensor_ctx_.get(), t_info);
+    tensor_map_[t_info.name] = t;
+  }
+}
+
+ggml_tensor *zinferlm::Model::get_tensor_(std::string name) {
+  auto it = tensor_map_.find(name);
+  if (it != tensor_map_.end()) {
+    return it->second;
+  }
+  return nullptr;
+}
+
+zinferlm::model_info_t zinferlm::Model::info() const { return loader_->info(); }
+
+zinferlm::tokenizer_info_t zinferlm::Model::tokenizer_info() const {
+  return loader_->tokenizer_info();
+}
+
+std::vector<zinferlm::tensor_info_t> zinferlm::Model::tensor_info() const {
+  return loader_->tensor_info();
+}
+
+zinferlm::model_config_t zinferlm::Model::config() const {
+  return loader_->model_config();
+}
+
 std::vector<float> zinferlm::Model::predict(std::vector<int32_t> tokens,
-                                            int past_tokens) {
+                                            int past_tokens, KVCache *cache) {
   zinferlm::model_config_t cfg = config();
-  ggml_context_ptr ctx = init_engine(cfg.n_blocks * 64 + 256);
-  Graph graph(ctx.get());
-
-  if (!cache_) {
-    cache_ = std::make_unique<KVCache>(
-        ggml_backend_get_default_buffer_type(graph.get_backend()), cfg.max_context_len,
-        cfg.n_blocks, cfg.nkv, cfg.embedding_dim / cfg.nheads, GGML_TYPE_F16);
-  }
-
-  if (past_tokens == 0) {
-    cache_->reset();
-  }
+  Graph &graph = Graph::get_instance();
+  ggml_context_ptr ctx =
+      ggml_context_ptr{graph.init_context(cfg.n_blocks * 64 + 256)};
   std::vector<std::unique_ptr<Layer>> layers =
-      create_layers(ctx.get(), past_tokens, tokens.size(), cache_.get());
+      create_layers(ctx.get(), past_tokens, tokens.size(), cache);
   std::vector<Layer *> layer_ptrs;
   for (const auto &l : layers)
     layer_ptrs.push_back(l.get());
@@ -97,6 +131,13 @@ std::string zinferlm::Model::invoke(std::string input, int max_tokens) {
                           .num_tokens = tokens.size(),
                       });
   int past_tokens = 0;
+  model_config_t cfg = this->config();
+  Graph &graph = Graph::get_instance();
+  std::unique_ptr<KVCache> cache = std::make_unique<KVCache>(
+      ggml_backend_get_default_buffer_type(graph.get_backend()),
+      cfg.max_context_len, cfg.n_blocks, cfg.nkv,
+      cfg.embedding_dim / cfg.nheads, GGML_TYPE_F16);
+
   int i = 0;
   for (; i < max_tokens; i++) {
     if (past_tokens == 0) {
@@ -104,7 +145,7 @@ std::string zinferlm::Model::invoke(std::string input, int max_tokens) {
       p_start.tokens_count = tokens.size();
       dispatcher.dispatch(ModelEvent::PREFILL_STARTED, p_start);
     }
-    std::vector<float> logits = this->predict(tokens, past_tokens);
+    std::vector<float> logits = this->predict(tokens, past_tokens, cache.get());
     if (past_tokens == 0) {
       events::prefill_end_event_t p_end;
       p_end.tokens_count = tokens.size();

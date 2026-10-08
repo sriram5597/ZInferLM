@@ -1,5 +1,5 @@
-add_library(zinferlm ../include/zinferlm/models.h ../include/zinferlm/tokenizer.h ../include/zinferlm/chat.h
-    ../include/zinferlm/events.h ../include/zinferlm/metrics.h
+
+add_library(zinferlm SHARED
     ./model_loader/gguf/gguf.h ./model_loader/gguf/gguf.cpp 
     ./model_loader/gguf/metadata.cpp ./model_loader/gguf/metadata.h
     ./model_loader/gguf/tensors.cpp ./model_loader/gguf/tensors.h
@@ -7,6 +7,7 @@ add_library(zinferlm ../include/zinferlm/models.h ../include/zinferlm/tokenizer.
     ./tokenizer/special_token_vocab.cpp
     ./engine/graph.cpp ./engine/graph.h
     ./engine/tensors.cpp ./engine/tensors.h
+    ./engine/debug.cpp ./engine/debug.h
     ./layers/layers.h ./layers/token_emb.cpp ./layers/token_unemb.cpp
     ./layers/block.cpp ./layers/grouped_attn.cpp ./layers/swiglu.cpp
     ./kv_cache/cache.h ./kv_cache/cache.cpp
@@ -17,6 +18,19 @@ add_library(zinferlm ../include/zinferlm/models.h ../include/zinferlm/tokenizer.
     ./models/qwen/model.cpp ./models/qwen/model.h
     ./models/models.cpp
 )
+
+target_sources(zinferlm
+  PUBLIC
+    FILE_SET HEADERS
+    BASE_DIRS ${CMAKE_SOURCE_DIR}/include
+    FILES
+      ${CMAKE_SOURCE_DIR}/include/zinferlm/models.h
+      ${CMAKE_SOURCE_DIR}/include/zinferlm/tokenizer.h
+      ${CMAKE_SOURCE_DIR}/include/zinferlm/chat.h
+      ${CMAKE_SOURCE_DIR}/include/zinferlm/events.h
+      ${CMAKE_SOURCE_DIR}/include/zinferlm/metrics.h
+)
+
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(PCRE2 QUIET pcre2-8)
@@ -58,7 +72,16 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(minja)
 
-target_link_libraries(zinferlm PRIVATE ${PCRE2_LIBRARIES} minja ggml)
 
-target_include_directories(zinferlm PRIVATE . ${PCRE2_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/ggml/include)
-target_include_directories(zinferlm PUBLIC ../include)
+target_include_directories(zinferlm
+  PRIVATE
+    ${PCRE2_INCLUDE_DIRS}
+    ${CMAKE_SOURCE_DIR}/src
+)
+
+target_link_libraries(zinferlm PRIVATE ${PCRE2_LIBRARIES} minja PUBLIC ggml)
+
+if (TARGET ggml-cuda)
+  set(CMAKE_CUDA_HOST_COMPILER "/usr/bin/g++-14" CACHE FILEPATH "Host compiler for NVCC" FORCE)
+  target_link_libraries(zinferlm PRIVATE ggml-cuda)
+endif()
