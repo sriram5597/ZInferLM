@@ -26,9 +26,11 @@ public:
 class Chat {
 private:
   zinferlm::Model &model_;
+  bool debug_ = false;
 
 public:
   Chat(zinferlm::Model &m) : model_(m) {}
   ChatMessage invoke(std::vector<ChatMessage> &messages);
+  void set_debug(bool enabled) { debug_ = enabled; }
 };
 }; // namespace zinferlm

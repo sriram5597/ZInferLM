@@ -1,8 +1,12 @@
+#include <cmath>
 #include <cstdint>
+#include <ggml-backend.h>
 #include <ggml-cpp.h>
+#include <ggml.h>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 #include <zinferlm/models.h>
 #include <zinferlm/tokenizer.h>
 
@@ -13,52 +17,107 @@
 
 QwenModel::QwenModel(zinferlm::ModelLoader *l) : zinferlm::Model(l) {}
 
-std::vector<std::unique_ptr<Layer>> QwenModel::create_layers(ggml_context *ctx,
-                                                             int past_tokens,
-                                                             int len,
-                                                             KVCache *cache) {
-  uint32_t nblocks = loader_->model_config().n_blocks;
-  std::vector<std::unique_ptr<Layer>> layers;
+void QwenModel::create_input_tensors(ggml_context *ctx, uint32_t n_tokens,
+                                     uint32_t max_len) {
+  ggml_tensor *input = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, n_tokens);
+  ggml_set_input(input);
+  ggml_set_name(input, "input");
 
-  Layer *emb = create_embedding_layer_(ctx, "token_embd");
-  layers.push_back(std::unique_ptr<Layer>(emb));
+  ggml_tensor *positions = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, n_tokens);
+  ggml_set_input(positions);
+  ggml_set_name(positions, "positions");
+
+  ggml_tensor *mask = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, max_len, n_tokens);
+  ggml_set_input(mask);
+  ggml_set_name(mask, "mask");
+
+  input_tensors_ = {input, positions, mask};
+  max_context_len_ = max_len;
+}
+
+std::vector<ggml_tensor *> QwenModel::get_input_tensors() {
+  return input_tensors_;
+}
+
+void QwenModel::set_inputs(const std::vector<int32_t> &tokens,
+                           int past_tokens) {
+  ggml_tensor *input = input_tensors_[0];
+  ggml_tensor *positions = input_tensors_[1];
+  ggml_tensor *mask = input_tensors_[2];
+
+  ggml_backend_tensor_set(input, tokens.data(), 0,
+                          tokens.size() * sizeof(int32_t));
+
+  std::vector<int32_t> pos(tokens.size());
+  for (size_t i = 0; i < tokens.size(); i++) {
+    pos[i] = past_tokens + (int32_t)i;
+  }
+  ggml_backend_tensor_set(positions, pos.data(), 0,
+                          pos.size() * sizeof(int32_t));
+
+  std::vector<ggml_fp16_t> mask_data((size_t)max_context_len_ * tokens.size());
+  for (size_t q = 0; q < tokens.size(); q++) {
+    int pos_q = past_tokens + (int)q;
+    for (uint32_t k = 0; k < max_context_len_; k++) {
+      float v = ((int)k <= pos_q) ? 0.0f : -INFINITY;
+      mask_data[q * max_context_len_ + k] = ggml_fp32_to_fp16(v);
+    }
+  }
+  ggml_backend_tensor_set(mask, mask_data.data(), 0,
+                          mask_data.size() * sizeof(ggml_fp16_t));
+}
+
+ggml_tensor *QwenModel::build_graph(ggml_context *ctx, ggml_cgraph *gf,
+                                    KVCache *cache) {
+  uint32_t nblocks = loader_->model_config().n_blocks;
+
+  ggml_tensor *input = input_tensors_[0];
+  ggml_tensor *positions = input_tensors_[1];
+  ggml_tensor *mask = input_tensors_[2];
+
+  ggml_tensor *cur = input;
+
+  TokenEmbedding emb = create_embedding_layer_(ctx, "token_embd");
+  cur = emb(cur);
 
   for (uint32_t i = 0; i < nblocks; i++) {
-    Layer *attn = create_attention_layer_(
-        ctx, "blk." + std::to_string(i) + ".attn", i, past_tokens, len, cache);
-    Layer *ffn = create_ffn_layer_(ctx, "blk." + std::to_string(i) + ".ffn", i);
-    layers.push_back(std::unique_ptr<Layer>(attn));
-    layers.push_back(std::unique_ptr<Layer>(ffn));
+    std::string blk = "blk." + std::to_string(i);
+
+    GroupedAttentionHead attn = create_attention_layer_(
+        ctx, gf, positions, mask, blk + ".attn", i, cache);
+    cur = attn(cur);
+
+    SwigLU ffn = create_ffn_layer_(ctx, blk + ".ffn", i);
+    cur = ffn(cur);
   }
 
-  Layer *out = create_output_layer_(ctx, "output");
-  layers.push_back(std::unique_ptr<Layer>(out));
+  TokenUnembedding out = create_output_layer_(ctx, "output");
+  cur = out(cur);
 
-  return layers;
+  return cur;
 }
 
-Layer *QwenModel::create_embedding_layer_(ggml_context *ctx,
-                                          std::string layer_name) {
+TokenEmbedding QwenModel::create_embedding_layer_(ggml_context *ctx,
+                                                  std::string layer_name) {
   token_embedding_params_t params = {
       .ctx = ctx, .emb_w = get_tensor_(layer_name + ".weight")};
-  return new TokenEmbedding(params);
+  return TokenEmbedding(params);
 }
 
-Layer *QwenModel::create_output_layer_(ggml_context *ctx,
-                                       std::string layer_name) {
+TokenUnembedding QwenModel::create_output_layer_(ggml_context *ctx,
+                                                 std::string layer_name) {
   zinferlm::model_config_t config = loader_->model_config();
   token_unembedding_params_t uemb_params = {
       .ctx = ctx,
       .unemb_w = get_tensor_(layer_name + ".weight"),
       .norm_gamma = get_tensor_(layer_name + "_norm.weight"),
       .norm_eps = config.rms_eps};
-  return new TokenUnembedding(uemb_params);
+  return TokenUnembedding(uemb_params);
 }
 
-Layer *QwenModel::create_attention_layer_(ggml_context *ctx,
-                                          std::string layer_name, int block_id,
-                                          int past_tokens, int seq_len,
-                                          KVCache *cache) {
+GroupedAttentionHead QwenModel::create_attention_layer_(
+    ggml_context *ctx, ggml_cgraph *gf, ggml_tensor *positions,
+    ggml_tensor *mask, std::string layer_name, int block_id, KVCache *cache) {
   zinferlm::model_config_t config = loader_->model_config();
   ggml_tensor *q_w = get_tensor_(layer_name + "_q.weight");
   ggml_tensor *q_b = get_tensor_(layer_name + "_q.bias");
@@ -83,17 +142,17 @@ Layer *QwenModel::create_attention_layer_(ggml_context *ctx,
                                           .n_heads = config.nheads,
                                           .n_kv = config.nkv,
                                           .d_model = config.embedding_dim,
-                                          .past_tokens = past_tokens,
-                                          .len = seq_len,
                                           .residual = true,
                                           .norm_gamma = norm_info,
                                           .norm_eps = config.rms_eps,
-                                          .debug = debug_,
-                                          .cache = cache};
-  return new GroupedAttentionHead(attn_params);
+                                          .cache = cache,
+                                          .gf = gf,
+                                          .positions = positions,
+                                          .mask = mask};
+  return GroupedAttentionHead(attn_params);
 }
 
-Layer *QwenModel::create_ffn_layer_(ggml_context *ctx, std::string layer_name,
+SwigLU QwenModel::create_ffn_layer_(ggml_context *ctx, std::string layer_name,
                                     int block_id) {
   zinferlm::model_config_t config = loader_->model_config();
   ggml_tensor *up_w = get_tensor_(layer_name + "_up.weight");
@@ -109,18 +168,7 @@ Layer *QwenModel::create_ffn_layer_(ggml_context *ctx, std::string layer_name,
       .norm_gamma = norm_info,
       .norm_eps = config.rms_eps,
   };
-  return new SwigLU(sparams);
+  return SwigLU(sparams);
 }
 
-void QwenModel::summary() {
-  // ggml_context_ptr ctx = init_engine(loader_->get_tensor_count() * 48 + 128);
-  // Graph graph(ctx.get());
-  // std::unique_ptr<KVCache> cache =
-  // std::make_unique<KVCache>(ggml_backend_get_default_buffer_type(graph.get_backend()),
-  // 512,
-  //               nblocks, config.nkv, config.embedding_dim / config.nheads,
-  //               GGML_TYPE_F16);
-  // std::vector<Layer *> layers = build_graph_(ctx.get(), 0, 1, cache.get());
-  // ggml_cgraph *gf = graph.build(1);
-  // ggml_graph_print(gf);
-}
+void QwenModel::summary() {}

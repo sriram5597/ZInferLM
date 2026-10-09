@@ -22,7 +22,7 @@ static void sigint_handler(int) {
   _exit(0);
 }
 
-using ModelEvent = zinferlm::events::ModelEvent;
+using InferenceEvent = zinferlm::events::InferenceEvent;
 
 int main(int argc, char *argv[]) {
   if (argc < 2) {
@@ -50,7 +50,7 @@ int main(int argc, char *argv[]) {
   metrics_collector.collect();
 
   zinferlm::events::event_callback_t cb =
-      [](zinferlm::events::model_event_t event) -> void {
+      [](zinferlm::events::inference_event_t event) -> void {
     if (auto generated_event =
             std::get_if<zinferlm::events::token_generated_event_t>(&event)) {
       std::cout << "\033[33m" << generated_event->token;
@@ -75,8 +75,8 @@ int main(int argc, char *argv[]) {
   zinferlm::events::EventDispatcher &dispatcher =
       zinferlm::events::EventDispatcher::get_instance();
 
-  std::set<ModelEvent> events = {ModelEvent::GENERATION_COMPLETED,
-                                 ModelEvent::TOKEN_GENERATED};
+  std::set<InferenceEvent> events = {InferenceEvent::GENERATION_COMPLETED,
+                                     InferenceEvent::TOKEN_GENERATED};
   int observer_id = dispatcher.listen(cb, events);
   cleanup = [&dispatcher, observer_id]() -> void {
     dispatcher.unlisten(observer_id);

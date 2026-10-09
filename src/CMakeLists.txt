@@ -5,7 +5,7 @@ add_library(zinferlm SHARED
     ./model_loader/gguf/tensors.cpp ./model_loader/gguf/tensors.h
     ./tokenizer/tokenizer.cpp ./tokenizer/tokenizer.h
     ./tokenizer/special_token_vocab.cpp
-    ./engine/graph.cpp ./engine/graph.h
+    ./inference/inference.cpp ./inference/inference.h
     ./engine/tensors.cpp ./engine/tensors.h
     ./engine/debug.cpp ./engine/debug.h
     ./layers/layers.h ./layers/token_emb.cpp ./layers/token_unemb.cpp

@@ -7,8 +7,7 @@
 #include <vector>
 
 struct layer_kv_cache_t {
-  int len;
-  ggml_tensor* K;
+  ggml_tensor* K; // [d_head * n_kv, seq_len] head-major
   ggml_tensor* V;
 };
 
@@ -23,9 +22,11 @@ class KVCache {
     ggml_backend_buffer_ptr buffer_;
 
   public:
-    KVCache(int ctx_len, int layers, int n_kv, int d_head, ggml_type type);
+    KVCache(ggml_backend *backend, int ctx_len, int layers, int n_kv,
+            int d_head, ggml_type type);
     void set_graph(ggml_cgraph *gf);
     void reset();
-    void concat(ggml_context* context, int l, int seq_len, ggml_tensor* K, ggml_tensor* V);
+    void write_kv(ggml_context* ctx, int l, ggml_tensor* K, ggml_tensor* V, ggml_tensor* pos_idx);
     layer_kv_cache_t get_slice(ggml_context* graph_ctx, int layer);
+    int max_len() const { return max_len_; }
 };

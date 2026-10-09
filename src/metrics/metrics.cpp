@@ -4,12 +4,12 @@
 #include <zinferlm/events.h>
 #include <zinferlm/metrics.h>
 
-using ModelEvent = zinferlm::events::ModelEvent;
-using model_event_t = zinferlm::events::model_event_t;
+using InferenceEvent = zinferlm::events::InferenceEvent;
+using inference_event_t = zinferlm::events::inference_event_t;
 
 void zinferlm::metrics::LLMMetricsCollector::collect() {
   events::event_callback_t collector =
-      [this](events::model_event_t event) -> void {
+      [this](events::inference_event_t event) -> void {
     if (auto p_start = std::get_if<events::prefill_start_event_t>(&event)) {
       this->prefill_start_time_ = p_start->timestamp;
       this->prefill_tokens_count_ = p_start->tokens_count;
@@ -36,13 +36,13 @@ void zinferlm::metrics::LLMMetricsCollector::collect() {
     }
   };
   events::EventDispatcher &dispatcher = events::EventDispatcher::get_instance();
-  std::set<events::ModelEvent> events = {
-      events::ModelEvent::TOKENIZER_STARTED,
-      events::ModelEvent::TOKENIZER_COMPLETED,
-      events::ModelEvent::PREFILL_STARTED,
-      events::ModelEvent::PREFILL_COMPLETED,
-      events::ModelEvent::GENERATION_COMPLETED,
-      events::ModelEvent::TOKEN_GENERATED};
+  std::set<events::InferenceEvent> events = {
+      events::InferenceEvent::TOKENIZER_STARTED,
+      events::InferenceEvent::TOKENIZER_COMPLETED,
+      events::InferenceEvent::PREFILL_STARTED,
+      events::InferenceEvent::PREFILL_COMPLETED,
+      events::InferenceEvent::GENERATION_COMPLETED,
+      events::InferenceEvent::TOKEN_GENERATED};
   observer_id_ = dispatcher.listen(collector, events);
 }
 

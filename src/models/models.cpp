@@ -1,5 +1,7 @@
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <cstdio>
 #include <fcntl.h>
 #include <ggml-backend.h>
 #include <ggml-cpu.h>
@@ -7,31 +9,36 @@
 #include <iostream>
 #include <memory>
 #include <ostream>
-#include <string_view>
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "engine/graph.h"
+#if defined(CUDA_ENABLED) && CUDA_ENABLED
+#include <ggml-cuda.h>
+#endif
+
 #include "engine/tensors.h"
 #include "ggml-cpp.h"
-#include "kv_cache/cache.h"
 #include "model_loader/gguf/gguf.h"
 #include "qwen/model.h"
-#include "sampling/samplers.h"
-#include <zinferlm/events.h>
 #include <zinferlm/models.h>
-#include <zinferlm/tokenizer.h>
-
-using EventDispatcher = zinferlm::events::EventDispatcher;
-using ModelEvent = zinferlm::events::ModelEvent;
 
 static_assert(sizeof(struct ggml_tensor) > 0, "ggml integration check");
+
+namespace {
+void log_filter(enum ggml_log_level level, const char *text, void *user_data) {
+  (void)user_data;
+  if (level >= GGML_LOG_LEVEL_INFO) {
+    fputs(text, stderr);
+    fflush(stderr);
+  }
+}
+} // namespace
 
 std::unique_ptr<zinferlm::Model> zinferlm::Model::instance_ = nullptr;
 
 zinferlm::Model &zinferlm::Model::instance() {
   assert(instance_ && "Model not loaded. Call load() first.");
-  return *instance_.get();
+  return *instance_;
 }
 
 zinferlm::Model::Model(zinferlm::ModelLoader *loader)
@@ -41,9 +48,39 @@ zinferlm::Model::Model(zinferlm::ModelLoader *loader)
                              .mem_buffer = nullptr,
                              .no_alloc = true};
   tensor_ctx_ = ggml_context_ptr{ggml_init(params)};
+
+  ggml_backend_ptr cpu_backend = ggml_backend_ptr{ggml_backend_cpu_init()};
+  backends_.push_back(std::move(cpu_backend));
+#if defined(CUDA_ENABLED) && CUDA_ENABLED
+  if (get_backend_type() == GGML_BACKEND_DEVICE_TYPE_GPU) {
+    std::cout << "Using cuda backend.." << std::endl;
+    ggml_backend_ptr cuda_backend = ggml_backend_ptr{ggml_backend_cuda_init(0)};
+    backends_.insert(backends_.begin(), std::move(cuda_backend));
+  }
+#endif
+}
+
+Backend zinferlm::Model::get_backend_type() {
+  Backend backend_type = GGML_BACKEND_DEVICE_TYPE_CPU;
+#if defined(CUDA_ENABLED) && CUDA_ENABLED
+  backend_type = GGML_BACKEND_DEVICE_TYPE_GPU;
+#endif
+  return backend_type;
+}
+
+ggml_backend *zinferlm::Model::get_backend() { return backends_[0].get(); }
+
+std::vector<ggml_backend *> zinferlm::Model::backends() const {
+  std::vector<ggml_backend *> ptrs;
+  ptrs.reserve(backends_.size());
+  for (const auto &b : backends_) {
+    ptrs.push_back(b.get());
+  }
+  return ptrs;
 }
 
 bool zinferlm::Model::load(const char *model_path) {
+  ggml_log_set(log_filter, nullptr);
   int raw_fd = open(model_path, O_RDONLY);
   if (raw_fd == -1) {
     std::cerr << "Unable to read model file: " << model_path << std::endl;
@@ -71,17 +108,17 @@ void zinferlm::Model::load_tensors_() {
     ggml_tensor *t = create_tensor(tensor_ctx_.get(), t_info);
     tensor_map_[t_info.name] = t;
   }
-  if (Graph::get_backend_type() == GGML_BACKEND_DEVICE_TYPE_GPU) {
+  if (get_backend_type() == GGML_BACKEND_DEVICE_TYPE_GPU) {
     std::cout << "setting buffer..." << std::endl;
     tensor_buffer_ =
         ggml_backend_buffer_ptr{ggml_backend_alloc_ctx_tensors_from_buft(
             tensor_ctx_.get(), ggml_backend_get_default_buffer_type(
-                                   Graph::get_instance().get_backend()))};
+                                   get_backend()))};
   }
 
   for (auto &t_info : loader_->tensor_info()) {
     ggml_tensor *t = get_tensor_(t_info.name);
-    if (Graph::get_backend_type() != GGML_BACKEND_DEVICE_TYPE_CPU) {
+    if (get_backend_type() != GGML_BACKEND_DEVICE_TYPE_CPU) {
       GGML_ASSERT(tensor_buffer_.get() != NULL && "tensor buffer not set");
       ggml_backend_tensor_set(t, loader_->get_tensor_ptr(t_info.data_offset), 0,
                               ggml_nbytes(t));
@@ -111,92 +148,4 @@ std::vector<zinferlm::tensor_info_t> zinferlm::Model::tensor_info() const {
 
 zinferlm::model_config_t zinferlm::Model::config() const {
   return loader_->model_config();
-}
-
-std::vector<float> zinferlm::Model::predict(std::vector<int32_t> tokens,
-                                            int past_tokens, KVCache *cache) {
-  zinferlm::model_config_t cfg = config();
-  Graph &graph = Graph::get_instance();
-  ggml_context_ptr ctx =
-      ggml_context_ptr{graph.init_context(cfg.n_blocks * 64 + 256)};
-  std::vector<std::unique_ptr<Layer>> layers =
-      create_layers(ctx.get(), past_tokens, tokens.size(), cache);
-  std::vector<Layer *> layer_ptrs;
-  for (const auto &l : layers)
-    layer_ptrs.push_back(l.get());
-  graph.set_layers(layer_ptrs);
-  graph.set_debug_mode(debug_);
-  ggml_tensor *output = graph.execute(tokens);
-  GGML_ASSERT(tokens.size() <= output->ne[1]);
-  std::vector<float> logits(output->ne[0]);
-  uint64_t offset =
-      (tokens.size() - 1) * output->ne[0] * ggml_type_size(output->type);
-  ggml_backend_tensor_get(output, logits.data(), offset,
-                          output->ne[0] * ggml_type_size(output->type));
-
-  return logits;
-}
-
-std::string zinferlm::Model::invoke(std::string input, int max_tokens) {
-  EventDispatcher &dispatcher = EventDispatcher::get_instance();
-  zinferlm::Tokenizer tokenizer = zinferlm::Tokenizer::for_model(*this);
-  std::string output = "";
-  dispatcher.dispatch(ModelEvent::TOKENIZER_STARTED,
-                      events::tokenizer_started_event_t{
-                          .str_len = input.length(),
-                      });
-  std::vector<int32_t> tokens = tokenizer.tokenize(input);
-  dispatcher.dispatch(ModelEvent::TOKENIZER_COMPLETED,
-                      events::tokenizer_completed_event_t{
-                          .num_tokens = tokens.size(),
-                      });
-  int past_tokens = 0;
-  model_config_t cfg = this->config();
-  std::unique_ptr<KVCache> cache =
-      std::make_unique<KVCache>(cfg.max_context_len, cfg.n_blocks, cfg.nkv,
-                                cfg.embedding_dim / cfg.nheads, GGML_TYPE_F16);
-
-  int i = 0;
-  for (; i < max_tokens; i++) {
-    if (past_tokens == 0) {
-      events::prefill_start_event_t p_start;
-      p_start.tokens_count = tokens.size();
-      dispatcher.dispatch(ModelEvent::PREFILL_STARTED, p_start);
-    }
-    std::vector<float> logits = this->predict(tokens, past_tokens, cache.get());
-    if (past_tokens == 0) {
-      events::prefill_end_event_t p_end;
-      p_end.tokens_count = tokens.size();
-      dispatcher.dispatch(ModelEvent::PREFILL_COMPLETED, p_end);
-    }
-
-    sampler_params_t params = {.temperature = 0.2f, .top_k = 0};
-    Sampler sampler(params);
-    std::pair<uint64_t, float> sample = sampler.sample(logits);
-    past_tokens += tokens.size();
-    tokens.clear();
-    tokens.push_back(sample.first);
-    std::string out_token =
-        tokenizer.decode(static_cast<uint32_t>(sample.first));
-    output += out_token;
-    if (tokenizer.is_stop_token(out_token)) {
-      dispatcher.dispatch(ModelEvent::GENERATION_COMPLETED,
-                          zinferlm::events::generation_completed_event_t{
-                              .status = StreamStatus::EOS,
-                              .num_tokens = static_cast<uint32_t>(i)});
-
-      break;
-    }
-
-    dispatcher.dispatch(ModelEvent::TOKEN_GENERATED,
-                        zinferlm::events::token_generated_event_t{
-                            .seq_id = static_cast<uint32_t>(i),
-                            .token = std::string_view{out_token}});
-  }
-  if (i >= max_tokens) {
-    dispatcher.dispatch(ModelEvent::GENERATION_COMPLETED,
-                        zinferlm::events::generation_completed_event_t{
-                            .status = StreamStatus::MAX_CTX_REACHED});
-  }
-  return output;
 }

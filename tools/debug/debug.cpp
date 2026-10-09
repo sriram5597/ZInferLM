@@ -19,9 +19,9 @@ int main(int argc, char *argv[]) {
   }
 
   auto &model = zinferlm::Model::instance();
-  model.set_debug(true);
 
   zinferlm::Chat chat(model);
+  chat.set_debug(true);
   std::vector<zinferlm::ChatMessage> messages = {
     zinferlm::UserMessage("hi")
   };

@@ -49,12 +49,12 @@ struct prefill_end_event_t {
   int tokens_count;
 };
 
-using model_event_t =
+using inference_event_t =
     std::variant<tokenizer_started_event_t, tokenizer_completed_event_t,
                  token_generated_event_t, generation_completed_event_t,
                  prefill_start_event_t, prefill_end_event_t>;
 
-enum ModelEvent {
+enum InferenceEvent {
   TOKENIZER_STARTED,
   TOKENIZER_COMPLETED,
   TOKEN_GENERATED,
@@ -63,11 +63,11 @@ enum ModelEvent {
   PREFILL_COMPLETED,
 };
 
-using event_callback_t = std::function<void(zinferlm::events::model_event_t)>;
+using event_callback_t = std::function<void(zinferlm::events::inference_event_t)>;
 
 struct listener_t {
   event_callback_t callback;
-  std::set<zinferlm::events::ModelEvent> events;
+  std::set<zinferlm::events::InferenceEvent> events;
 };
 
 class EventDispatcher {
@@ -83,10 +83,10 @@ public:
 
   static EventDispatcher &get_instance();
   int listen(event_callback_t listener,
-             std::set<zinferlm::events::ModelEvent> events);
+             std::set<zinferlm::events::InferenceEvent> events);
   void unlisten(int observer_id);
-  void dispatch(zinferlm::events::ModelEvent event_name,
-                zinferlm::events::model_event_t event);
+  void dispatch(zinferlm::events::InferenceEvent event_name,
+                zinferlm::events::inference_event_t event);
 };
 
 }; // namespace events

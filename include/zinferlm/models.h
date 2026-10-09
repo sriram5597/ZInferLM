@@ -9,9 +9,9 @@
 #include <unordered_map>
 #include <vector>
 
-class Layer;
 class KVCache;
-class Graph;
+
+using Backend = enum ggml_backend_dev_type;
 
 namespace zinferlm {
 struct model_info_t {
@@ -72,29 +72,28 @@ public:
   tokenizer_info_t tokenizer_info() const;
   std::vector<tensor_info_t> tensor_info() const;
   model_config_t config() const;
-  virtual std::vector<std::unique_ptr<Layer>> create_layers(ggml_context *ctx,
-                                                            int past_tokens,
-                                                            int len,
-                                                            KVCache *cache) = 0;
+
+  virtual ggml_tensor *build_graph(ggml_context *ctx, ggml_cgraph *gf,
+                                   KVCache *cache) = 0;
+  virtual void create_input_tensors(ggml_context *ctx, uint32_t n_tokens,
+                                    uint32_t max_len) = 0;
+  virtual std::vector<ggml_tensor *> get_input_tensors() = 0;
+  virtual void set_inputs(const std::vector<int32_t> &tokens, int past_tokens) = 0;
   virtual void summary() = 0;
 
-  std::vector<float> predict(std::vector<int32_t> tokens, int past_tokens,
-                             KVCache *cache);
+  ggml_backend *get_backend();
+  std::vector<ggml_backend *> backends() const;
+  static Backend get_backend_type();
 
   static Model &instance();
   static bool load(const char *model_path);
-
-  void set_debug(bool enabled) { debug_ = enabled; }
-  std::string invoke(std::string input, int max_tokens);
 
 protected:
   ggml_context_ptr tensor_ctx_;
   std::unordered_map<std::string, ggml_tensor *> tensor_map_;
   std::unique_ptr<ModelLoader> loader_;
+  std::vector<ggml_backend_ptr> backends_;
   Model(zinferlm::ModelLoader *loader);
-  bool debug_ = false;
-  std::unique_ptr<ggml_backend, void (*)(ggml_backend *)> backend_{
-      nullptr, [](ggml_backend *) {}};
 
   void load_tensors_();
   ggml_tensor *get_tensor_(std::string);

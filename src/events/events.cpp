@@ -10,7 +10,7 @@ EventDispatcher &EventDispatcher::get_instance() {
 }
 
 int EventDispatcher::listen(zinferlm::events::event_callback_t listener,
-                            std::set<zinferlm::events::ModelEvent> events) {
+                            std::set<zinferlm::events::InferenceEvent> events) {
   int seq = callback_seq_;
   listeners.insert(
       {seq, {.callback = std::move(listener), .events = std::move(events)}});
@@ -24,8 +24,8 @@ void EventDispatcher::unlisten(int observer_id) {
   callbacks_count_--;
 }
 
-void EventDispatcher::dispatch(zinferlm::events::ModelEvent event_name,
-                               zinferlm::events::model_event_t event) {
+void EventDispatcher::dispatch(zinferlm::events::InferenceEvent event_name,
+                               zinferlm::events::inference_event_t event) {
   for (auto &it : listeners) {
     listener_t l = it.second;
     if (l.events.contains(event_name)) {
