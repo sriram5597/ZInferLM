@@ -1,19 +1,23 @@
+#pragma once
+
 #include <cstdint>
-#include <memory>
 #include <vector>
 
 struct sampler_params_t {
   float temperature;
-  int top_k;
+  uint32_t top_k;
+  float top_p;
 };
 
 class Sampler {
 private:
   float temp_;
-  int top_k_;
+  uint32_t top_k_;
+  float top_p_;
   std::pair<uint64_t, float> greedy_(std::vector<float> logits);
   std::pair<uint64_t, float> top_k_sample_(std::vector<float> logits);
   std::vector<float> softmax_(std::vector<float> logits);
+  std::pair<uint64_t, float> top_p_sample_(std::vector<float> logits);
 
 public:
   Sampler(sampler_params_t params);

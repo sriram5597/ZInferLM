@@ -137,7 +137,7 @@ std::vector<float> Inference::predict(std::vector<int32_t> tokens,
   return logits;
 }
 
-std::string Inference::invoke(std::string input, int max_tokens) {
+std::string Inference::invoke(std::string input, uint32_t max_tokens) {
   EventDispatcher &dispatcher = EventDispatcher::get_instance();
   Tokenizer tokenizer = Tokenizer::for_model(model_);
   std::string output = "";
@@ -166,9 +166,7 @@ std::string Inference::invoke(std::string input, int max_tokens) {
       dispatcher.dispatch(InferenceEvent::PREFILL_COMPLETED, p_end);
     }
 
-    sampler_params_t params = {.temperature = 0.2f, .top_k = 0};
-    Sampler sampler(params);
-    std::pair<uint64_t, float> sample = sampler.sample(logits);
+    std::pair<uint64_t, float> sample = sampler_.sample(logits);
     past_tokens += tokens.size();
     tokens.clear();
     tokens.push_back(sample.first);

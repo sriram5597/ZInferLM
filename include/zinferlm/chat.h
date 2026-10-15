@@ -1,9 +1,17 @@
 #pragma once
 
-#include "zinferlm/models.h"
 #include <string>
+#include <zinferlm/models.h>
 
 namespace zinferlm {
+
+struct chat_params_t {
+  uint32_t max_tokens;
+  float temperature;
+  uint32_t top_k;
+  float top_p;
+};
+
 class ChatMessage {
 public:
   std::string message;
@@ -30,7 +38,8 @@ private:
 
 public:
   Chat(zinferlm::Model &m) : model_(m) {}
-  ChatMessage invoke(std::vector<ChatMessage> &messages);
+  ChatMessage invoke(std::vector<ChatMessage> &messages,
+                     const zinferlm::chat_params_t &params);
   void set_debug(bool enabled) { debug_ = enabled; }
 };
 }; // namespace zinferlm

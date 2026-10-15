@@ -5,8 +5,8 @@
 #include <zinferlm/chat.h>
 #include <zinferlm/tokenizer.h>
 
-zinferlm::ChatMessage
-zinferlm::Chat::invoke(std::vector<ChatMessage>& messages) {
+zinferlm::ChatMessage zinferlm::Chat::invoke(std::vector<ChatMessage> &messages,
+                                             const chat_params_t &params) {
   zinferlm::Tokenizer tokenizer = zinferlm::Tokenizer::for_model(model_);
   zinferlm::tokenizer_info_t tok_info = model_.tokenizer_info();
   ChatTemplate chat_template = ChatTemplate::from_str(
@@ -15,8 +15,14 @@ zinferlm::Chat::invoke(std::vector<ChatMessage>& messages) {
   int max_tokens = model_.config().max_context_len;
   std::string chat_message = chat_template.render(messages, true);
 
-  zinferlm::Inference inference(model_);
+  Inference inference(model_);
   inference.set_debug(debug_);
-  std::string output = inference.invoke(chat_message, max_tokens);
+  Sampler sampler(sampler_params_t{
+      .temperature = params.temperature,
+      .top_k = params.top_k,
+      .top_p=params.top_p
+  });
+  inference.set_sampler(sampler);
+  std::string output = inference.invoke(chat_message, params.max_tokens);
   return AssistantMessage(output);
 }

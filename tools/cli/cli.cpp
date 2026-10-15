@@ -1,12 +1,9 @@
-#include "zinferlm/chat.h"
-#include "zinferlm/events.h"
-#include <csignal>
+#include <zinferlm/chat.h>
+#include <zinferlm/events.h>
 #include <cstdlib>
 #include <iostream>
 #include <set>
 #include <string>
-#include <string_view>
-#include <variant>
 #include <vector>
 #include <zinferlm/metrics.h>
 #include <zinferlm/models.h>
@@ -39,12 +36,17 @@ int main(int argc, char *argv[]) {
   }
 
   auto &model = zinferlm::Model::instance();
+  zinferlm::model_config_t cfg = model.config();
 
   zinferlm::model_info_t m_info = model.info();
+  std::vector<zinferlm::tensor_info_t> tensors = model.tensor_info();
   std::cout << "Name: " << m_info.name << std::endl;
   std::cout << "Version: " << m_info.version << std::endl;
   std::cout << "Architecture: " << m_info.architecture << std::endl;
   std::cout << "File Type: " << m_info.file_type << std::endl;
+  std::cout << "Layers: " << cfg.n_blocks << std::endl;
+  std::cout << "Max Context: " << cfg.max_context_len << std::endl;
+  std::cout << "Tensors Count: " << tensors.size() << std::endl;
 
   zinferlm::metrics::LLMMetricsCollector metrics_collector;
   metrics_collector.collect();
@@ -110,11 +112,15 @@ int main(int argc, char *argv[]) {
       }
       continue;
     }
-    // model.set_stream(handler);
     zinferlm::Chat chat(model);
     zinferlm::UserMessage user_message = zinferlm::UserMessage(input);
     messages.push_back(user_message);
-    zinferlm::ChatMessage out_msg = chat.invoke(messages);
+    const zinferlm::chat_params_t params = {
+      .max_tokens=8192,
+      .temperature=0.5,
+      .top_p=0.7,
+    };
+    zinferlm::ChatMessage out_msg = chat.invoke(messages, params);
     messages.push_back(out_msg);
     zinferlm::metrics::model_metrics_t metrics =
         metrics_collector.get_metrics();

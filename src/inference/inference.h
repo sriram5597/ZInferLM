@@ -1,5 +1,7 @@
 #pragma once
 
+#include "engine/debug.h"
+#include "sampling/samplers.h"
 #include <cstdint>
 #include <ggml-backend.h>
 #include <ggml-cpp.h>
@@ -8,18 +10,16 @@
 #include <string>
 #include <vector>
 
-#include "engine/debug.h"
-
 class KVCache;
 
 namespace zinferlm {
-
 class Model;
 
 class Inference {
 private:
   Model &model_;
   ggml_backend_sched_ptr sched_;
+  Sampler sampler_;
 
   ggml_context *ctx_ = nullptr;
   std::vector<uint8_t> ctx_buffer_;
@@ -46,8 +46,8 @@ public:
   explicit Inference(Model &model);
   ~Inference();
 
-  std::string invoke(std::string input, int max_tokens);
+  std::string invoke(std::string input, uint32_t max_tokens);
   void set_debug(bool enabled) { debug_ = enabled; }
+  void set_sampler(Sampler &sampler) { sampler_ = sampler; }
 };
-
 } // namespace zinferlm
