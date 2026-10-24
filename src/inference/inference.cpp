@@ -31,10 +31,9 @@ Inference::Inference(Model &model) : model_(model) {
       backend_ptrs.data(), nullptr, backend_ptrs.size(), 16384, false, true)};
 
   model_config_t cfg = model_.config();
-  cache_ = std::make_unique<KVCache>(model_.get_backend(), cfg.max_context_len,
-                                     cfg.n_blocks, cfg.nkv,
-                                     cfg.embedding_dim / cfg.nheads,
-                                     GGML_TYPE_F16);
+  cache_ = std::make_unique<KVCache>(
+      model_.get_backend(), cfg.max_context_len, cfg.n_blocks, cfg.nkv,
+      cfg.embedding_dim / cfg.nheads, GGML_TYPE_F16);
 }
 
 Inference::~Inference() = default;
@@ -45,9 +44,8 @@ ggml_context *Inference::init_context(uint64_t n_op_estimate) {
   if (ctx_buffer_.size() < ctx_size) {
     ctx_buffer_.resize(ctx_size);
   }
-  ggml_init_params params = {.mem_size = ctx_size,
-                             .mem_buffer = ctx_buffer_.data(),
-                             .no_alloc = true};
+  ggml_init_params params = {
+      .mem_size = ctx_size, .mem_buffer = ctx_buffer_.data(), .no_alloc = true};
   if (ctx_) {
     ggml_free(ctx_);
   }
@@ -70,7 +68,8 @@ void Inference::set_output(ggml_tensor *out) {
 bool Inference::prepare(uint32_t n_tokens) {
   ggml_backend_sched_reset(sched_.get());
   for (ggml_tensor *t : model_.get_input_tensors()) {
-    ggml_backend_sched_set_tensor_backend(sched_.get(), t, model_.get_backend());
+    ggml_backend_sched_set_tensor_backend(sched_.get(), t,
+                                          model_.get_backend());
   }
 
   if (!ggml_backend_sched_reserve(sched_.get(), gf_)) {
@@ -172,7 +171,6 @@ std::string Inference::invoke(std::string input, uint32_t max_tokens) {
     tokens.push_back(sample.first);
     std::string out_token =
         tokenizer.decode(static_cast<uint32_t>(sample.first));
-    output += out_token;
     if (tokenizer.is_stop_token(out_token)) {
       dispatcher.dispatch(InferenceEvent::GENERATION_COMPLETED,
                           events::generation_completed_event_t{
@@ -181,10 +179,12 @@ std::string Inference::invoke(std::string input, uint32_t max_tokens) {
       break;
     }
 
-    dispatcher.dispatch(InferenceEvent::TOKEN_GENERATED,
-                        events::token_generated_event_t{
-                            .seq_id = static_cast<uint32_t>(i),
-                            .token = std::string_view{out_token}});
+    output += out_token;
+
+    dispatcher.dispatch(
+        InferenceEvent::TOKEN_GENERATED,
+        events::token_generated_event_t{.seq_id = static_cast<uint32_t>(i),
+                                        .token = std::string_view{out_token}});
   }
   if (i >= max_tokens) {
     dispatcher.dispatch(InferenceEvent::GENERATION_COMPLETED,

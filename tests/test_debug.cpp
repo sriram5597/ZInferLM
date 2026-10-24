@@ -28,5 +28,6 @@ int main() {
     }
     std::cout << std::endl;
     
+    zinferlm::Model::unload();
     return 0;
 }

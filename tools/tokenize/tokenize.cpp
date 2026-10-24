@@ -60,5 +60,6 @@ int main(int argc, char *argv[])
     std::cout << token_id << " -> \'" << token << "\'" << "\n";
   }
 
+  zinferlm::Model::unload();
   return 0;
 }

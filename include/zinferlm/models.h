@@ -87,6 +87,7 @@ public:
 
   static Model &instance();
   static bool load(const char *model_path);
+  static void unload();
 
 protected:
   ggml_context_ptr tensor_ctx_;

@@ -48,5 +48,6 @@ int main(int argc, char *argv[]) {
   }
   std::cout << "Max logit at index " << max_idx << ": " << max_val << "\n";
   
+  zinferlm::Model::unload();
   return 0;
 }

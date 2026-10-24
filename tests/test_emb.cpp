@@ -48,5 +48,6 @@ int main(int argc, char *argv[]) {
     }
   }
   
+  zinferlm::Model::unload();
   return 0;
 }

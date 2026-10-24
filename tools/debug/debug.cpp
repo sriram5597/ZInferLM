@@ -27,5 +27,6 @@ int main(int argc, char *argv[]) {
       chat.invoke(messages, {.max_tokens = 1, .temperature = 1.0});
   std::cout << output.message << std::endl;
 
+  zinferlm::Model::unload();
   return 0;
 }

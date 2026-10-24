@@ -103,6 +103,13 @@ bool zinferlm::Model::load(const char *model_path) {
   return false;
 }
 
+void zinferlm::Model::unload() {
+  if (instance_) {
+    instance_.reset();
+    std::cout << "Model unloaded" << std::endl;
+  }
+}
+
 void zinferlm::Model::load_tensors_() {
   for (auto &t_info : loader_->tensor_info()) {
     ggml_tensor *t = create_tensor(tensor_ctx_.get(), t_info);

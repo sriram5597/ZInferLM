@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ZInferLM Chat</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #171a21;
+      --panel-2: #1e222b;
+      --border: #2a2f3a;
+      --text: #e6e8ee;
+      --muted: #8b93a3;
+      --accent: #4f8cff;
+      --accent-2: #6ea8ff;
+      --user-bubble: #1f4d8f;
+      --assistant-bubble: #232834;
+      --danger: #ff6b6b;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                   Helvetica, Arial, sans-serif;
+      font-size: 15px;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 16px;
+      gap: 12px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    header h1 {
+      font-size: 18px;
+      margin: 0;
+      font-weight: 600;
+    }
+
+    header .actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    button {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 14px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+
+    button:hover { background: #262c38; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    button.primary:hover { background: var(--accent-2); }
+
+    /* System message panel */
+    .system-panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+
+    .system-panel label {
+      display: block;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .system-panel textarea {
+      width: 100%;
+      resize: vertical;
+      min-height: 48px;
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-family: inherit;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .system-panel textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    /* Chat area */
+    .chat {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 8px 2px;
+      min-height: 200px;
+    }
+
+    .empty-state {
+      color: var(--muted);
+      text-align: center;
+      margin-top: 48px;
+      font-size: 14px;
+    }
+
+    .message {
+      max-width: 78%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    .message.user {
+      align-self: flex-end;
+      background: var(--user-bubble);
+      border-bottom-right-radius: 4px;
+    }
+
+    .message.assistant {
+      align-self: flex-start;
+      background: var(--assistant-bubble);
+      border-bottom-left-radius: 4px;
+    }
+
+    .message.error {
+      align-self: flex-start;
+      background: rgba(255, 107, 107, 0.12);
+      color: var(--danger);
+    }
+
+    .message .role {
+      display: block;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      opacity: 0.7;
+      margin-bottom: 4px;
+    }
+
+    /* Input area */
+    .input-area {
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+
+    .input-area textarea {
+      flex: 1;
+      resize: none;
+      min-height: 44px;
+      max-height: 160px;
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-family: inherit;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .input-area textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .hint {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ZInferLM Chat</h1>
+    <div class="actions">
+      <button id="clear-btn" type="button">Clear conversation</button>
+    </div>
+  </header>
+
+  <div class="system-panel">
+    <label for="system-message">System message</label>
+    <textarea
+      id="system-message"
+      placeholder="Optional instructions that guide the assistant's behavior (sent as role: 'system')."
+    ></textarea>
+  </div>
+
+  <div class="chat" id="chat">
+    <div class="empty-state" id="empty-state">
+      Start a conversation by typing a message below.
+    </div>
+  </div>
+
+  <div class="input-area">
+    <textarea
+      id="message-input"
+      placeholder="Type your message…"
+      rows="1"
+    ></textarea>
+    <button id="send-btn" class="primary" type="button">Send</button>
+  </div>
+  <div class="hint">Enter to send · Shift+Enter for a new line</div>
+
+  <script>
+    // Name of the model to request from /v1/chat/completions.
+    const MODEL = "zinferlm";
+
+    const chatEl = document.getElementById("chat");
+    const emptyStateEl = document.getElementById("empty-state");
+    const systemEl = document.getElementById("system-message");
+    const inputEl = document.getElementById("message-input");
+    const sendBtn = document.getElementById("send-btn");
+    const clearBtn = document.getElementById("clear-btn");
+
+    // Conversation history (user + assistant turns). The system message is
+    // prepended fresh on every request so edits take effect immediately.
+    let history = [];
+
+    // Abort controller for the in-flight streaming request (if any), so the
+    // "Clear conversation" button can cancel an active generation.
+    let currentAbortController = null;
+
+    function hideEmptyState() {
+      if (emptyStateEl) emptyStateEl.remove();
+    }
+
+    function appendMessage(role, content, isError = false) {
+      hideEmptyState();
+
+      const wrap = document.createElement("div");
+      const cls = isError ? "error" : (role === "assistant" ? "assistant" : "user");
+      wrap.className = "message " + cls;
+
+      if (!isError) {
+        const roleLabel = document.createElement("span");
+        roleLabel.className = "role";
+        roleLabel.textContent = role;
+        wrap.appendChild(roleLabel);
+      }
+
+      const text = document.createElement("span");
+      text.textContent = content;
+      wrap.appendChild(text);
+
+      chatEl.appendChild(wrap);
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }
+
+    // Creates an assistant message bubble that can be updated incrementally as
+    // tokens stream in. Returns helpers to append text and finalize the content.
+    function createStreamingMessage(role) {
+      hideEmptyState();
+
+      const wrap = document.createElement("div");
+      wrap.className = "message assistant";
+
+      const roleLabel = document.createElement("span");
+      roleLabel.className = "role";
+      roleLabel.textContent = role || "assistant";
+      wrap.appendChild(roleLabel);
+
+      const text = document.createElement("span");
+      text.textContent = "";
+      wrap.appendChild(text);
+
+      chatEl.appendChild(wrap);
+
+      return {
+        append(chunk) {
+          text.textContent += chunk;
+          chatEl.scrollTop = chatEl.scrollHeight;
+        },
+        finalize() {
+          return text.textContent;
+        },
+      };
+    }
+
+    function buildMessages(userText) {
+      const msgs = [];
+      const system = systemEl.value.trim();
+      if (system) {
+        msgs.push({ role: "system", content: system });
+      }
+      msgs.push(...history);
+      msgs.push({ role: "user", content: userText });
+      return msgs;
+    }
+
+    async function send() {
+      const text = inputEl.value.trim();
+      if (!text || sendBtn.disabled) return;
+
+      sendBtn.disabled = true;
+      inputEl.value = "";
+      autoGrow();
+
+      appendMessage("user", text);
+      history.push({ role: "user", content: text });
+
+      const controller = new AbortController();
+      currentAbortController = controller;
+
+      let streamMsg = null;
+      let role = "assistant";
+      let finished = false;
+
+      try {
+        const res = await fetch("/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: MODEL, messages: buildMessages(text) }),
+          signal: controller.signal,
+        });
+
+        if (!res.ok) {
+          const errBody = await res.text();
+          throw new Error(
+            "Request failed with status " + res.status +
+              (errBody ? ": " + errBody : "")
+          );
+        }
+
+        if (!res.body) {
+          throw new Error("Response body is not readable");
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (!finished) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // Server sends Server-Sent Events separated by a blank line
+          // ("data: {...}\n\n"). A single network chunk may contain several
+          // events or only a partial one, so keep leftover bytes in `buffer`.
+          let boundary;
+          while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+            const rawEvent = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+
+            const dataLines = rawEvent
+              .split("\n")
+              .filter((line) => line.startsWith("data:"));
+
+            for (const line of dataLines) {
+              const payload = line.slice("data:".length).trim();
+              if (!payload) continue;
+
+              if (payload === "[DONE]") {
+                finished = true;
+                break;
+              }
+
+              let obj;
+              try {
+                obj = JSON.parse(payload);
+              } catch (e) {
+                continue;
+              }
+
+              if (obj.role) role = obj.role;
+              if (obj.content != null) {
+                if (!streamMsg) streamMsg = createStreamingMessage(role);
+                streamMsg.append(obj.content);
+              }
+            }
+          }
+        }
+
+        if (streamMsg) {
+          const content = streamMsg.finalize();
+          history.push({ role, content });
+        }
+      } catch (err) {
+        if (err.name === "AbortError") {
+          // Cancelled by the user; leave the partial assistant message as-is.
+        } else {
+          appendMessage("assistant", "Error: " + err.message, true);
+        }
+      } finally {
+        currentAbortController = null;
+        sendBtn.disabled = false;
+        inputEl.focus();
+      }
+    }
+
+    function autoGrow() {
+      inputEl.style.height = "auto";
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + "px";
+    }
+
+    inputEl.addEventListener("input", autoGrow);
+
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        send();
+      }
+    });
+
+    sendBtn.addEventListener("click", send);
+
+    clearBtn.addEventListener("click", () => {
+      if (currentAbortController) {
+        currentAbortController.abort();
+        currentAbortController = null;
+      }
+      history = [];
+      chatEl.querySelectorAll(".message").forEach((n) => n.remove());
+      const placeholder = document.createElement("div");
+      placeholder.className = "empty-state";
+      placeholder.id = "empty-state";
+      placeholder.textContent = "Start a conversation by typing a message below.";
+      chatEl.appendChild(placeholder);
+      inputEl.focus();
+    });
+  </script>
+</body>
+</html>

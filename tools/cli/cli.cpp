@@ -135,5 +135,6 @@ int main(int argc, char *argv[]) {
     metrics_collector.reset();
   }
 
+  zinferlm::Model::unload();
   return 0;
 }

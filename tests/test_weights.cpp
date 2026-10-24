@@ -153,5 +153,6 @@ int main(int argc, char* argv[]) {
         std::cout << "\n✗ Some weights have issues!" << std::endl;
     }
     
+    zinferlm::Model::unload();
     return 0;
 }
