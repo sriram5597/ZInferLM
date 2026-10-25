@@ -1,6 +1,9 @@
 #pragma once
 
+#include <condition_variable>
+#include <queue>
 #include <string>
+#include <thread>
 #include <zinferlm/models.h>
 
 namespace zinferlm {
@@ -41,5 +44,10 @@ public:
   ChatMessage invoke(std::vector<ChatMessage> &messages,
                      const zinferlm::chat_params_t &params);
   void set_debug(bool enabled) { debug_ = enabled; }
+};
+
+struct chat_task_t {
+  std::vector<zinferlm::ChatMessage> messages;
+  chat_params_t params;
 };
 }; // namespace zinferlm

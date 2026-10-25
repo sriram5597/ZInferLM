@@ -80,22 +80,26 @@ void chat_completion(Session &session, json::object req_payload) {
     }
   };
 
-  session.initiate_streaming();
-
+  int observer_id = -1;
   zinferlm::events::EventDispatcher &dispatcher =
       zinferlm::events::EventDispatcher::get_instance();
-  std::set<zinferlm::events::InferenceEvent> events = {
-      zinferlm::events::InferenceEvent::GENERATION_COMPLETED,
-      zinferlm::events::InferenceEvent::TOKEN_GENERATED};
-  int observer_id = dispatcher.listen(cb, events);
+
+  if (streaming) {
+
+    session.initiate_streaming();
+    std::set<zinferlm::events::InferenceEvent> events = {
+        zinferlm::events::InferenceEvent::GENERATION_COMPLETED,
+        zinferlm::events::InferenceEvent::TOKEN_GENERATED};
+    observer_id = dispatcher.listen(cb, events);
+  }
   zinferlm::chat_params_t params = {
       .max_tokens = 8192, .temperature = 0.9, .top_p = 0.7};
   zinferlm::Chat chat(zinferlm::Model::instance());
   zinferlm::ChatMessage output = chat.invoke(chat_messages, params);
-  dispatcher.unlisten(observer_id);
-
-  if (!streaming) {
-    session.send_json_response(
-        http::status::ok, {{"role", output.role}, {"content", output.message}});
+  if (streaming) {
+    dispatcher.unlisten(observer_id);
   }
+
+  session.send_json_response(
+      http::status::ok, {{"role", output.role}, {"content", output.message}});
 }

@@ -1,7 +1,12 @@
 #include "chat_message.h"
 #include "inference/inference.h"
+#include "inference/worker.hpp"
 #include "sampling/samplers.h"
 #include "zinferlm/models.h"
+#include <future>
+#include <iostream>
+#include <string>
+#include <utility>
 #include <zinferlm/chat.h>
 #include <zinferlm/tokenizer.h>
 
@@ -17,12 +22,18 @@ zinferlm::ChatMessage zinferlm::Chat::invoke(std::vector<ChatMessage> &messages,
 
   Inference inference(model_);
   inference.set_debug(debug_);
-  Sampler sampler(sampler_params_t{
-      .temperature = params.temperature,
-      .top_k = params.top_k,
-      .top_p=params.top_p
-  });
+  Sampler sampler(sampler_params_t{.temperature = params.temperature,
+                                   .top_k = params.top_k,
+                                   .top_p = params.top_p});
   inference.set_sampler(sampler);
-  std::string output = inference.invoke(chat_message, params.max_tokens);
-  return AssistantMessage(output);
+  InferenceWorker &worker = InferenceWorker::instance();
+  std::promise<std::string> out_promise;
+  std::future<std::string> future = out_promise.get_future();
+  inference_task_t task = {.inference = inference,
+                           .input = chat_message,
+                           .max_tokens = params.max_tokens};
+  worker.add_task(task, std::move(out_promise));
+  std::string result = future.get();
+  std::cout << "Output: " << result << std::endl;
+  return AssistantMessage(result);
 }

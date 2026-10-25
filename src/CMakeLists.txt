@@ -1,11 +1,13 @@
 
 add_library(zinferlm SHARED
     ./model_loader/gguf/gguf.h ./model_loader/gguf/gguf.cpp 
+    ./worker/worker.hpp
     ./model_loader/gguf/metadata.cpp ./model_loader/gguf/metadata.h
     ./model_loader/gguf/tensors.cpp ./model_loader/gguf/tensors.h
     ./tokenizer/tokenizer.cpp ./tokenizer/tokenizer.h
     ./tokenizer/special_token_vocab.cpp
     ./inference/inference.cpp ./inference/inference.h
+    ./inference/worker.cpp ./inference/worker.hpp
     ./engine/tensors.cpp ./engine/tensors.h
     ./engine/debug.cpp ./engine/debug.h
     ./layers/layers.h ./layers/token_emb.cpp ./layers/token_unemb.cpp
