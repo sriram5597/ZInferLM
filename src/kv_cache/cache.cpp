@@ -1,9 +1,13 @@
 #include "cache.h"
-#include "ggml-cpp.h"
-#include "ggml.h"
-#include "zinferlm/models.h"
+
 #include <cstdint>
 #include <string>
+
+#include "ggml-cpp.h"
+#include "ggml.h"
+
+namespace zinferlm {
+namespace internal {
 
 KVCache::KVCache(ggml_backend *backend, int ctx_len, int layers, int n_kv,
                  int d_head, ggml_type type = GGML_TYPE_F16)
@@ -66,3 +70,6 @@ layer_kv_cache_t KVCache::get_slice(ggml_context *graph_ctx, int l) {
 
   };
 }
+
+} // namespace internal
+} // namespace zinferlm

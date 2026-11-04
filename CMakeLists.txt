@@ -24,9 +24,6 @@ set(GGML_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(ggml)
 add_subdirectory(src)
 
-if(BUILD_CLI)
-  add_subdirectory(tools/cli)
-endif()
 
 if(BUILD_DEBUG)
   add_subdirectory(tools/debug)

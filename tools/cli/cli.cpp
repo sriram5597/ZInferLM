@@ -48,7 +48,7 @@ int main(int argc, char *argv[]) {
   std::cout << "Max Context: " << cfg.max_context_len << std::endl;
   std::cout << "Tensors Count: " << tensors.size() << std::endl;
 
-  zinferlm::metrics::LLMMetricsCollector metrics_collector;
+  zinferlm::metrics::LLMMetricsCollector metrics_collector("run-1");
   metrics_collector.collect();
 
   zinferlm::events::event_callback_t cb =
@@ -120,7 +120,8 @@ int main(int argc, char *argv[]) {
       .temperature=0.5,
       .top_p=0.7,
     };
-    zinferlm::ChatMessage out_msg = chat.invoke(messages, params);
+    zinferlm::ChatMessage out_msg = zinferlm::AssistantMessage(
+        chat.invoke(messages, params).get());
     messages.push_back(out_msg);
     zinferlm::metrics::model_metrics_t metrics =
         metrics_collector.get_metrics();

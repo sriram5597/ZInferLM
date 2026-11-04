@@ -1,13 +1,17 @@
 #pragma once
-#include <cstdint>
-#include <string_view>
-#include <string>
-#include <vector>
-#include <memory>
-#include <variant>
 
-enum MetadataDType : uint32_t
-{
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <variant>
+#include <vector>
+
+namespace zinferlm {
+namespace internal {
+
+enum MetadataDType : uint32_t {
   // The value is a 8-bit unsigned integer.
   GGUF_METADATA_VALUE_TYPE_UINT8 = 0,
   // The value is a 8-bit signed integer.
@@ -23,14 +27,10 @@ enum MetadataDType : uint32_t
   // The value is a 32-bit IEEE754 floating point number.
   GGUF_METADATA_VALUE_TYPE_FLOAT32 = 6,
   // The value is a boolean.
-  // 1-byte value where 0 is false and 1 is true.
-  // Anything else is invalid, and should be treated as either the model being invalid or the reader being buggy.
   GGUF_METADATA_VALUE_TYPE_BOOL = 7,
   // The value is a UTF-8 non-null-terminated string, with length prepended.
   GGUF_METADATA_VALUE_TYPE_STRING = 8,
   // The value is an array of other values, with the length and type prepended.
-  ///
-  // Arrays can be nested, and the length of the array is the number of elements in the array, not the number of bytes.
   GGUF_METADATA_VALUE_TYPE_ARRAY = 9,
   // The value is a 64-bit unsigned little-endian integer.
   GGUF_METADATA_VALUE_TYPE_UINT64 = 10,
@@ -40,10 +40,8 @@ enum MetadataDType : uint32_t
   GGUF_METADATA_VALUE_TYPE_FLOAT64 = 12,
 };
 
-constexpr std::string_view metadata_dtype_name(MetadataDType t)
-{
-  switch (t)
-  {
+constexpr std::string_view metadata_dtype_name(MetadataDType t) {
+  switch (t) {
   case GGUF_METADATA_VALUE_TYPE_UINT8:
     return "UINT8";
   case GGUF_METADATA_VALUE_TYPE_INT8:
@@ -72,7 +70,7 @@ constexpr std::string_view metadata_dtype_name(MetadataDType t)
     return "FLOAT64";
   }
   return "UNKNOWN";
-};
+}
 
 using primitive_value_t = std::variant<
     uint8_t,  // index 0
@@ -88,17 +86,16 @@ using primitive_value_t = std::variant<
     double    // index 10
     >;
 
-class MetadataValue
-{
+class MetadataValue {
 public:
   virtual ~MetadataValue() = default;
   virtual int size() const = 0;
   virtual std::string to_string() const = 0;
-  static std::unique_ptr<MetadataValue> from_ptr(const char *ptr, MetadataDType dtype);
+  static std::unique_ptr<MetadataValue> from_ptr(const char *ptr,
+                                                 MetadataDType dtype);
 };
 
-class MetadataPrimitiveValue : public MetadataValue
-{
+class MetadataPrimitiveValue : public MetadataValue {
 private:
   primitive_value_t data_;
   int size_;
@@ -111,28 +108,28 @@ public:
   static MetadataPrimitiveValue from_ptr(const char *ptr, MetadataDType dtype);
 };
 
-class MetadataStringValue : public MetadataValue
-{
+class MetadataStringValue : public MetadataValue {
 private:
   const uint64_t *len_;
   std::string_view data_;
   uint64_t offset_;
 
 public:
-  MetadataStringValue(std::string_view s, const uint64_t *l) : data_(s), len_(l), offset_(0) {}
+  MetadataStringValue(std::string_view s, const uint64_t *l)
+      : data_(s), len_(l), offset_(0) {}
   int size() const override;
   std::string to_string() const override;
   static MetadataStringValue from_ptr(const char *ptr);
 };
 
-class MetadataArrayValue : public MetadataValue
-{
+class MetadataArrayValue : public MetadataValue {
 private:
   const MetadataDType *val_type_;
   const uint64_t *len_;
   std::vector<std::unique_ptr<MetadataValue>> elements_;
 
-  MetadataArrayValue(const MetadataDType *vt, const uint64_t *l) : val_type_(std::move(vt)), len_(std::move(l)) {}
+  MetadataArrayValue(const MetadataDType *vt, const uint64_t *l)
+      : val_type_(std::move(vt)), len_(std::move(l)) {}
 
 public:
   static MetadataArrayValue from_ptr(const char *ptr);
@@ -141,14 +138,14 @@ public:
   int size() const override;
 };
 
-class Metadata
-{
+class Metadata {
 private:
   MetadataStringValue key_;
   MetadataDType val_type_;
   std::unique_ptr<MetadataValue> val_;
 
-  Metadata(MetadataStringValue k, MetadataDType vt, std::unique_ptr<MetadataValue> v) : key_(k), val_type_(vt), val_(std::move(v)) {}
+  Metadata(MetadataStringValue k, MetadataDType vt, std::unique_ptr<MetadataValue> v)
+      : key_(k), val_type_(vt), val_(std::move(v)) {}
 
 public:
   static Metadata from_ptr(const char *ptr);
@@ -159,28 +156,21 @@ public:
 
   std::string val_string() const;
 
-  template <typename T>
-  T value() const
-  {
-    if (const auto *prim = dynamic_cast<const MetadataPrimitiveValue *>(val_.get()))
+  template <typename T> T value() const {
+    if (const auto *prim =
+            dynamic_cast<const MetadataPrimitiveValue *>(val_.get()))
       return std::get<T>(prim->value());
     return {};
   }
 
-  template <typename T>
-  std::vector<T> val_array() const
-  {
+  template <typename T> std::vector<T> val_array() const {
     std::vector<T> out;
-    if (const auto *arr = dynamic_cast<const MetadataArrayValue *>(val_.get()))
-    {
-      for (const auto &t : arr->elements())
-      {
-        if constexpr (std::is_same_v<T, std::string>)
-        {
+    if (const auto *arr = dynamic_cast<const MetadataArrayValue *>(val_.get())) {
+      for (const auto &t : arr->elements()) {
+        if constexpr (std::is_same_v<T, std::string>) {
           out.push_back(t->to_string());
-        }
-        else if (const auto *prim = dynamic_cast<const MetadataPrimitiveValue *>(t.get()))
-        {
+        } else if (const auto *prim =
+                       dynamic_cast<const MetadataPrimitiveValue *>(t.get())) {
           out.push_back(std::get<T>(prim->value()));
         }
       }
@@ -188,3 +178,6 @@ public:
     return out;
   }
 };
+
+} // namespace internal
+} // namespace zinferlm

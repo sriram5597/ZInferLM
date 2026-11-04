@@ -1,10 +1,15 @@
 #pragma once
 
 #include <condition_variable>
+#include <cstdint>
+#include <future>
 #include <queue>
 #include <string>
 #include <thread>
-#include <zinferlm/models.h>
+#include <vector>
+
+#include "zinferlm/export.h"
+#include "zinferlm/models.h"
 
 namespace zinferlm {
 
@@ -21,28 +26,33 @@ public:
   std::string role;
   ChatMessage(std::string r, std::string msg) : role(r), message(msg) {}
 };
+
 class SystemMessage : public ChatMessage {
 public:
   SystemMessage(std::string msg) : ChatMessage("system", msg) {}
 };
+
 class UserMessage : public ChatMessage {
 public:
   UserMessage(std::string msg) : ChatMessage("user", msg) {}
 };
+
 class AssistantMessage : public ChatMessage {
 public:
   AssistantMessage(std::string msg) : ChatMessage("assistant", msg) {}
 };
 
-class Chat {
+class ZINFERLM_API Chat {
 private:
   zinferlm::Model &model_;
+  std::string chat_id_;
   bool debug_ = false;
 
 public:
-  Chat(zinferlm::Model &m) : model_(m) {}
-  ChatMessage invoke(std::vector<ChatMessage> &messages,
-                     const zinferlm::chat_params_t &params);
+  Chat(zinferlm::Model &m, std::string chat_id)
+      : model_(m), chat_id_(chat_id) {}
+  std::future<std::string> invoke(std::vector<ChatMessage> &messages,
+                                  const zinferlm::chat_params_t &params);
   void set_debug(bool enabled) { debug_ = enabled; }
 };
 
@@ -50,4 +60,5 @@ struct chat_task_t {
   std::vector<zinferlm::ChatMessage> messages;
   chat_params_t params;
 };
-}; // namespace zinferlm
+
+} // namespace zinferlm

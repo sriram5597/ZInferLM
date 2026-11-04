@@ -4,16 +4,20 @@
 #include <iomanip>
 #include <iostream>
 #include <vector>
-#include <ggml.h>
+
 #include <ggml-backend.h>
+#include <ggml.h>
 
 #include "debug.h"
 
 #define INDENT "    "
 
+namespace zinferlm {
+namespace internal {
+
 float debug_get_float_value(const uint8_t *data, ggml_type type,
-                             const size_t *nb, size_t i0, size_t i1,
-                             size_t i2, size_t i3) {
+                            const size_t *nb, size_t i0, size_t i1, size_t i2,
+                            size_t i3) {
   size_t i = i3 * nb[3] + i2 * nb[2] + i1 * nb[1] + i0 * nb[0];
   float v;
   if (type == GGML_TYPE_F16) {
@@ -37,7 +41,7 @@ float debug_get_float_value(const uint8_t *data, ggml_type type,
 }
 
 void debug_print_tensor_values(const uint8_t *data, ggml_type type,
-                                const int64_t *ne, const size_t *nb, int n) {
+                               const int64_t *ne, const size_t *nb, int n) {
   GGML_ASSERT(n > 0);
   float sum = 0;
   for (int64_t i3 = 0; i3 < ne[3]; i3++) {
@@ -134,3 +138,6 @@ bool debug_eval_callback(ggml_tensor *tensor, bool ask, void *user_data) {
 
   return true;
 }
+
+} // namespace internal
+} // namespace zinferlm

@@ -1,11 +1,15 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
-#include <ggml-backend.h>
-#include <ggml.h>
 #include <iostream>
 
+#include <ggml-backend.h>
+#include <ggml.h>
+
 #include "layers.h"
+
+namespace zinferlm {
+namespace internal {
 
 GroupedAttentionHead::GroupedAttentionHead(grouped_attn_head_params params)
     : Layer(params.ctx, params.residual, params.norm_gamma, params.norm_eps),
@@ -79,3 +83,6 @@ ggml_tensor *GroupedAttentionHead::forward(ggml_tensor *x) const {
 
   return attn_out;
 }
+
+} // namespace internal
+} // namespace zinferlm

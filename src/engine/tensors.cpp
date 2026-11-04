@@ -1,11 +1,15 @@
 #include <cstdint>
-#include <ggml.h>
 #include <iostream>
 #include <string>
 #include <vector>
 
+#include <ggml.h>
+#include <zinferlm/models.h>
+
 #include "tensors.h"
-#include "zinferlm/models.h"
+
+namespace zinferlm {
+namespace internal {
 
 ggml_tensor *create_tensor(ggml_context *ctx, zinferlm::tensor_info_t info) {
   ggml_tensor *t =
@@ -14,3 +18,6 @@ ggml_tensor *create_tensor(ggml_context *ctx, zinferlm::tensor_info_t info) {
   ggml_set_name(t, info.name.c_str());
   return t;
 }
+
+} // namespace internal
+} // namespace zinferlm

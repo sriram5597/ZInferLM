@@ -1,3 +1,4 @@
+#include <boost/asio/bind_executor.hpp>
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/address.hpp>
@@ -12,11 +13,8 @@
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/field.hpp>
 #include <boost/beast/http/impl/write.hpp>
-#include <boost/beast/http/message_fwd.hpp>
 #include <boost/beast/http/read.hpp>
-#include <boost/beast/http/serializer_fwd.hpp>
 #include <boost/beast/http/status.hpp>
-#include <boost/beast/http/string_body_fwd.hpp>
 #include <boost/beast/http/verb.hpp>
 #include <boost/beast/version.hpp>
 #include <boost/config.hpp>
@@ -34,7 +32,6 @@
 #include <fstream>
 #include <ios>
 #include <iostream>
-#include <locale>
 #include <memory>
 #include <sstream>
 #include <thread>
@@ -98,15 +95,14 @@ Listener::Listener(net::io_context &ioc, tcp::endpoint endpoint)
 }
 
 void Listener::do_accept() {
-  acceptor_.async_accept(net::make_strand(ioc_),
-                         [this](beast::error_code ec, tcp::socket socket) {
-                           if (ec) {
-                             return;
-                           }
-                           std::cout << "Request accepted.." << std::endl;
-                           std::make_shared<Session>(std::move(socket))->run();
-                           do_accept();
-                         });
+  acceptor_.async_accept(
+      [this](beast::error_code ec, tcp::socket socket) {
+        if (ec) {
+          return;
+        }
+        std::make_shared<Session>(std::move(socket))->run();
+        do_accept();
+      });
 }
 
 void Listener::run() { do_accept(); }
@@ -118,26 +114,29 @@ void Listener::stop() {
   ioc_.stop();
 }
 
-void Session::run() { do_read_(); }
+void Session::run() {
+  net::post(strand_, [self = shared_from_this()] { self->do_read_(); });
+}
 
 void Session::do_read_() {
-  auto self(shared_from_this());
+  auto self = shared_from_this();
   req_ = {};
   stream_.expires_after(std::chrono::seconds(30));
   http::async_read(
       stream_, buffer_, req_,
-      [this, self](beast::error_code ec, std::size_t bytes_transferred) {
-        boost::ignore_unused(bytes_transferred);
-        if (ec == http::error::end_of_stream) {
-          self->do_close_();
-          return;
-        }
-        if (ec) {
-          std::cerr << "Read Error: " << ec.message() << std::endl;
-          return;
-        }
-        self->handle_request_();
-      });
+      net::bind_executor(
+          strand_, [self](beast::error_code ec, std::size_t bytes_transferred) {
+            boost::ignore_unused(bytes_transferred);
+            if (ec == http::error::end_of_stream) {
+              self->do_close_();
+              return;
+            }
+            if (ec) {
+              std::cerr << "Read Error: " << ec.message() << std::endl;
+              return;
+            }
+            self->handle_request_();
+          }));
 }
 
 void Session::handle_request_() {
@@ -189,26 +188,12 @@ void Session::send_json_response(http::status status, json::value payload) {
 }
 
 void Session::initiate_streaming() {
-  auto res = std::make_shared<http::response<http::empty_body>>(
-      http::status::ok, req_.version());
-  res->set(http::field::server, "zinferlm-server");
-  res->set(http::field::content_type, "text/event-stream");
-  res->set(http::field::cache_control, "no-cache");
-  res->set(http::field::connection, "keep-alive");
-  res->chunked(true);
-
-  auto sr = std::make_shared<http::response_serializer<http::empty_body>>(*res);
-  stream_.expires_after(std::chrono::seconds(60));
-  http::async_write_header(
-      stream_, *sr,
-      [self = shared_from_this(), res, sr](beast::error_code ec, std::size_t) {
-        if (ec) {
-          std::cerr << "Failed to write to server stream: " << ec.message()
-                    << std::endl;
-          self->do_close_();
-          return;
-        }
-      });
+  // The SSE header is actually written inside flush_streaming_queue_ (gated by
+  // header_sent_), so it is serialized with the data chunks on the strand.
+  net::post(strand_, [self = shared_from_this()] {
+    self->header_sent_ = false;
+    self->flush_streaming_queue_();
+  });
 }
 
 void Session::send_html_response_(http::status status, std::string body) {
@@ -224,21 +209,24 @@ void Session::send_html_response_(http::status status, std::string body) {
 
 void Session::send_response_(
     std::shared_ptr<http::response<http::string_body>> res) {
-  stream_.expires_after(std::chrono::seconds(30));
+  net::post(strand_, [self = shared_from_this(), res] {
+    self->stream_.expires_after(std::chrono::seconds(30));
 
-  http::async_write(
-      stream_, *res,
-      [self = shared_from_this(), res](beast::error_code ec, std::size_t) {
-        if (ec) {
-          std::cout << "Write Error: " << ec.message() << std::endl;
-          return;
-        }
-        if (res->keep_alive()) {
-          self->do_read_();
-        } else {
-          self->do_close_();
-        }
-      });
+    http::async_write(
+        self->stream_, *res,
+        net::bind_executor(
+            self->strand_, [self, res](beast::error_code ec, std::size_t) {
+              if (ec) {
+                std::cout << "Write Error: " << ec.message() << std::endl;
+                return;
+              }
+              if (res->keep_alive()) {
+                self->do_read_();
+              } else {
+                self->do_close_();
+              }
+            }));
+  });
 }
 
 std::string Session::make_chunk_(std::string raw_string) {
@@ -256,44 +244,89 @@ void Session::stream_json_message(json::value payload, bool is_end) {
   if (is_end) {
     chunked_bytes += "0\r\n\r\n";
   }
-  streaming_queue_.push(chunked_bytes);
-  if (!is_writing_) {
-    flush_streaming_queue_();
+
+  {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    streaming_queue_.push(std::move(chunked_bytes));
   }
+
+  // Wake the ASIO loop from any thread. The socket is never touched here.
+  net::post(strand_,
+            [self = shared_from_this()] { self->flush_streaming_queue_(); });
 }
 
 void Session::flush_streaming_queue_() {
-  if (streaming_queue_.empty()) {
-    is_writing_ = false;
+  // Runs only on strand_: never concurrent with itself, never on the worker
+  // thread. All socket I/O for streaming happens here.
+  if (is_writing_) {
     return;
   }
+
+  if (!header_sent_) {
+    is_writing_ = true;
+    auto res = std::make_shared<http::response<http::empty_body>>(
+        http::status::ok, req_.version());
+    res->set(http::field::server, "zinferlm-server");
+    res->set(http::field::content_type, "text/event-stream");
+    res->set(http::field::cache_control, "no-cache");
+    res->set(http::field::connection, "keep-alive");
+    res->chunked(true);
+
+    auto sr =
+        std::make_shared<http::response_serializer<http::empty_body>>(*res);
+    stream_.expires_after(std::chrono::seconds(60));
+    http::async_write_header(
+        stream_, *sr,
+        net::bind_executor(strand_, [self = shared_from_this(), res,
+                                     sr](beast::error_code ec, std::size_t) {
+          if (ec) {
+            std::cerr << "Failed to write to server stream: " << ec.message()
+                      << std::endl;
+            self->do_close_();
+            return;
+          }
+          self->header_sent_ = true;
+          self->is_writing_ = false;
+          self->flush_streaming_queue_();
+        }));
+    return;
+  }
+
+  std::string current_chunk;
+  {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    if (streaming_queue_.empty()) {
+      return;
+    }
+    current_chunk = std::move(streaming_queue_.front());
+    streaming_queue_.pop();
+  }
+
   is_writing_ = true;
-  std::string current_chunk = streaming_queue_.front();
-  streaming_queue_.pop();
   stream_.expires_after(std::chrono::seconds(30));
 
-  net::async_write(stream_, net::buffer(current_chunk),
-                   [self = shared_from_this(),
-                    current_chunk](beast::error_code ec, std::size_t) {
-                     if (ec) {
-                       std::cerr
-                           << "Client disconnected midstream: " << ec.message()
-                           << std::endl;
-                       self->is_writing_ = false;
-                       self->do_close_();
-                       return;
-                     }
-                     if (current_chunk.find("0\r\n\r\n") != std::string::npos) {
-                       self->is_writing_ = false;
-                       if (self->req_.keep_alive()) {
-                         self->do_read_();
-                       } else {
-                         self->do_close_();
-                       }
-                       return;
-                     }
-                     self->flush_streaming_queue_();
-                   });
+  net::async_write(
+      stream_, net::buffer(current_chunk),
+      net::bind_executor(strand_, [self = shared_from_this(), current_chunk](
+                                      beast::error_code ec, std::size_t) {
+        if (ec) {
+          std::cerr << "Client disconnected midstream: " << ec.message()
+                    << std::endl;
+          self->is_writing_ = false;
+          self->do_close_();
+          return;
+        }
+        self->is_writing_ = false;
+        if (current_chunk.find("0\r\n\r\n") != std::string::npos) {
+          if (self->req_.keep_alive()) {
+            self->do_read_();
+          } else {
+            self->do_close_();
+          }
+          return;
+        }
+        self->flush_streaming_queue_();
+      }));
 }
 
 void Session::do_close_() {

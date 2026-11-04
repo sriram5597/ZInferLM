@@ -1,21 +1,24 @@
 #include <cmath>
 #include <cstdint>
-#include <ggml-backend.h>
-#include <ggml-cpp.h>
-#include <ggml.h>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
+
+#include <ggml-backend.h>
+#include <ggml-cpp.h>
+#include <ggml.h>
 #include <zinferlm/models.h>
 #include <zinferlm/tokenizer.h>
 
 #include "engine/tensors.h"
-#include "ggml.h"
 #include "layers/layers.h"
 #include "model.h"
 
-QwenModel::QwenModel(zinferlm::ModelLoader *l) : zinferlm::Model(l) {}
+namespace zinferlm {
+namespace internal {
+
+QwenModel::QwenModel(ModelLoader *l) : ModelImpl(l) {}
 
 void QwenModel::create_input_tensors(ggml_context *ctx, uint32_t n_tokens,
                                      uint32_t max_len) {
@@ -172,3 +175,6 @@ SwigLU QwenModel::create_ffn_layer_(ggml_context *ctx, std::string layer_name,
 }
 
 void QwenModel::summary() {}
+
+} // namespace internal
+} // namespace zinferlm

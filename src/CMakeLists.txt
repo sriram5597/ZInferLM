@@ -1,10 +1,12 @@
 
 add_library(zinferlm SHARED
     ./model_loader/gguf/gguf.h ./model_loader/gguf/gguf.cpp 
+    ./model_loader/loader.h
     ./worker/worker.hpp
     ./model_loader/gguf/metadata.cpp ./model_loader/gguf/metadata.h
     ./model_loader/gguf/tensors.cpp ./model_loader/gguf/tensors.h
-    ./tokenizer/tokenizer.cpp ./tokenizer/tokenizer.h
+    ./tokenizer/tokenizer.cpp
+    ./tokenizer/tokenizer_impl.cpp ./tokenizer/tokenizer_impl.h
     ./tokenizer/special_token_vocab.cpp
     ./inference/inference.cpp ./inference/inference.h
     ./inference/worker.cpp ./inference/worker.hpp
@@ -18,6 +20,7 @@ add_library(zinferlm SHARED
     ./events/events.cpp
     ./sampling/samplers.h ./sampling/samplers.cpp 
     ./models/qwen/model.cpp ./models/qwen/model.h
+    ./models/model_impl.cpp ./models/model_impl.h
     ./models/models.cpp
 )
 
@@ -81,10 +84,28 @@ target_include_directories(zinferlm
     ${CMAKE_SOURCE_DIR}/src
 )
 
-target_link_libraries(zinferlm PRIVATE ${PCRE2_LIBRARIES} minja PUBLIC ggml)
+target_link_libraries(zinferlm PRIVATE ${PCRE2_LIBRARIES} minja ggml)
 
 if (TARGET ggml-cuda)
   set(CMAKE_CUDA_HOST_COMPILER "/usr/bin/g++-14" CACHE FILEPATH "Host compiler for NVCC" FORCE)
   target_link_libraries(zinferlm PRIVATE ggml-cuda)
   target_compile_definitions(zinferlm PRIVATE CUDA_ENABLED=1)
 endif()
+
+# Hide all symbols by default; only ZINFERLM_API-annotated symbols are exported.
+set_target_properties(zinferlm PROPERTIES
+  CXX_VISIBILITY_PRESET hidden
+  VISIBILITY_INLINES_HIDDEN ON
+)
+
+include(GNUInstallDirs)
+
+install(TARGETS zinferlm
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/zinferlm
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)

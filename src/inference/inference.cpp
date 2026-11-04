@@ -20,19 +20,21 @@
 #include "kv_cache/cache.h"
 #include "sampling/samplers.h"
 
+namespace zinferlm {
+namespace internal {
+
 using zinferlm::events::EventDispatcher;
 using zinferlm::events::InferenceEvent;
 
-namespace zinferlm {
-
-Inference::Inference(Model &model) : model_(model) {
-  auto backend_ptrs = model_.backends();
+Inference::Inference(zinferlm::Model &model, std::string run_id)
+    : model_(model), run_id_(run_id), model_impl_(model.impl()) {
+  auto backend_ptrs = model_impl_.backends();
   sched_ = ggml_backend_sched_ptr{ggml_backend_sched_new(
       backend_ptrs.data(), nullptr, backend_ptrs.size(), 16384, false, true)};
 
-  model_config_t cfg = model_.config();
+  zinferlm::model_config_t cfg = model_impl_.config();
   cache_ = std::make_unique<KVCache>(
-      model_.get_backend(), cfg.max_context_len, cfg.n_blocks, cfg.nkv,
+      model_impl_.get_backend(), cfg.max_context_len, cfg.n_blocks, cfg.nkv,
       cfg.embedding_dim / cfg.nheads, GGML_TYPE_F16);
 }
 
@@ -56,7 +58,7 @@ ggml_context *Inference::init_context(uint64_t n_op_estimate) {
 
 ggml_cgraph *Inference::new_graph(uint32_t n_tokens, uint32_t max_context_len) {
   gf_ = ggml_new_graph(ctx_);
-  model_.create_input_tensors(ctx_, n_tokens, max_context_len);
+  model_impl_.create_input_tensors(ctx_, n_tokens, max_context_len);
   return gf_;
 }
 
@@ -67,9 +69,9 @@ void Inference::set_output(ggml_tensor *out) {
 
 bool Inference::prepare(uint32_t n_tokens) {
   ggml_backend_sched_reset(sched_.get());
-  for (ggml_tensor *t : model_.get_input_tensors()) {
+  for (ggml_tensor *t : model_impl_.get_input_tensors()) {
     ggml_backend_sched_set_tensor_backend(sched_.get(), t,
-                                          model_.get_backend());
+                                          model_impl_.get_backend());
   }
 
   if (!ggml_backend_sched_reserve(sched_.get(), gf_)) {
@@ -100,7 +102,7 @@ ggml_tensor *Inference::compute(std::vector<int32_t> input, int past_tokens) {
     std::cout << " ]\n";
   }
 
-  model_.set_inputs(input, past_tokens);
+  model_impl_.set_inputs(input, past_tokens);
 
   auto status = ggml_backend_sched_graph_compute(sched_.get(), gf_);
   if (status != GGML_STATUS_SUCCESS) {
@@ -112,13 +114,13 @@ ggml_tensor *Inference::compute(std::vector<int32_t> input, int past_tokens) {
 
 std::vector<float> Inference::predict(std::vector<int32_t> tokens,
                                       int past_tokens) {
-  model_config_t cfg = model_.config();
+  zinferlm::model_config_t cfg = model_impl_.config();
   const uint32_t n_tokens = (uint32_t)tokens.size();
 
   if (!graph_ready_ || n_tokens != cached_n_tokens_) {
     init_context(cfg.n_blocks * 64 + 256);
     new_graph(n_tokens, (uint32_t)cache_->max_len());
-    ggml_tensor *output = model_.build_graph(ctx_, gf_, cache_.get());
+    ggml_tensor *output = model_impl_.build_graph(ctx_, gf_, cache_.get());
     set_output(output);
     if (!prepare(n_tokens)) {
       return {};
@@ -140,12 +142,12 @@ std::string Inference::invoke(std::string input, uint32_t max_tokens) {
   EventDispatcher &dispatcher = EventDispatcher::get_instance();
   Tokenizer tokenizer = Tokenizer::for_model(model_);
   std::string output = "";
-  dispatcher.dispatch(InferenceEvent::TOKENIZER_STARTED,
+  dispatcher.dispatch(run_id_, InferenceEvent::TOKENIZER_STARTED,
                       events::tokenizer_started_event_t{
                           .str_len = input.length(),
                       });
   std::vector<int32_t> tokens = tokenizer.tokenize(input);
-  dispatcher.dispatch(InferenceEvent::TOKENIZER_COMPLETED,
+  dispatcher.dispatch(run_id_, InferenceEvent::TOKENIZER_COMPLETED,
                       events::tokenizer_completed_event_t{
                           .num_tokens = tokens.size(),
                       });
@@ -156,13 +158,13 @@ std::string Inference::invoke(std::string input, uint32_t max_tokens) {
     if (past_tokens == 0) {
       events::prefill_start_event_t p_start;
       p_start.tokens_count = tokens.size();
-      dispatcher.dispatch(InferenceEvent::PREFILL_STARTED, p_start);
+      dispatcher.dispatch(run_id_, InferenceEvent::PREFILL_STARTED, p_start);
     }
     std::vector<float> logits = predict(tokens, past_tokens);
     if (past_tokens == 0) {
       events::prefill_end_event_t p_end;
       p_end.tokens_count = tokens.size();
-      dispatcher.dispatch(InferenceEvent::PREFILL_COMPLETED, p_end);
+      dispatcher.dispatch(run_id_, InferenceEvent::PREFILL_COMPLETED, p_end);
     }
 
     std::pair<uint64_t, float> sample = sampler_.sample(logits);
@@ -172,7 +174,7 @@ std::string Inference::invoke(std::string input, uint32_t max_tokens) {
     std::string out_token =
         tokenizer.decode(static_cast<uint32_t>(sample.first));
     if (tokenizer.is_stop_token(out_token)) {
-      dispatcher.dispatch(InferenceEvent::GENERATION_COMPLETED,
+      dispatcher.dispatch(run_id_, InferenceEvent::GENERATION_COMPLETED,
                           events::generation_completed_event_t{
                               .status = StreamStatus::EOS,
                               .num_tokens = static_cast<uint32_t>(i)});
@@ -182,16 +184,17 @@ std::string Inference::invoke(std::string input, uint32_t max_tokens) {
     output += out_token;
 
     dispatcher.dispatch(
-        InferenceEvent::TOKEN_GENERATED,
+        run_id_, InferenceEvent::TOKEN_GENERATED,
         events::token_generated_event_t{.seq_id = static_cast<uint32_t>(i),
                                         .token = std::string_view{out_token}});
   }
   if (i >= max_tokens) {
-    dispatcher.dispatch(InferenceEvent::GENERATION_COMPLETED,
+    dispatcher.dispatch(run_id_, InferenceEvent::GENERATION_COMPLETED,
                         events::generation_completed_event_t{
                             .status = StreamStatus::MAX_CTX_REACHED});
   }
   return output;
 }
 
+} // namespace internal
 } // namespace zinferlm

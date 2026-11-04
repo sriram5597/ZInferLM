@@ -1,5 +1,4 @@
 #include <chrono>
-#include <iostream>
 #include <variant>
 #include <zinferlm/events.h>
 #include <zinferlm/metrics.h>
@@ -30,7 +29,7 @@ void zinferlm::metrics::LLMMetricsCollector::collect() {
       this->inp_tokens_ = t_end->num_tokens;
     }
     if (auto gen_completed =
-            std::get_if<events::GENERATION_COMPLETED>(&event)) {
+            std::get_if<events::generation_completed_event_t>(&event)) {
       this->generation_completed_time_t = gen_completed->timestamp;
       this->out_tokens_ = gen_completed->num_tokens;
     }
@@ -43,7 +42,7 @@ void zinferlm::metrics::LLMMetricsCollector::collect() {
       events::InferenceEvent::PREFILL_COMPLETED,
       events::InferenceEvent::GENERATION_COMPLETED,
       events::InferenceEvent::TOKEN_GENERATED};
-  observer_id_ = dispatcher.listen(collector, events);
+  dispatcher.listen(run_id_, collector, events);
 }
 
 zinferlm::metrics::model_metrics_t

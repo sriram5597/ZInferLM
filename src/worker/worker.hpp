@@ -11,6 +11,9 @@
 #include <thread>
 #include <utility>
 
+namespace zinferlm {
+namespace internal {
+
 // Thrown when a task is submitted to a stopped worker, or when a queued task is
 // cancelled during shutdown. Delivered either synchronously from add_task(), or
 // asynchronously through the task's std::future.
@@ -91,3 +94,6 @@ template <typename T, typename R> void Worker<T, R>::stop() {
     worker_thread_.join();
   }
 }
+
+} // namespace internal
+} // namespace zinferlm

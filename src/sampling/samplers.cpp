@@ -1,4 +1,5 @@
 #include "samplers.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -9,6 +10,9 @@
 #include <ostream>
 #include <random>
 #include <utility>
+
+namespace zinferlm {
+namespace internal {
 
 Sampler::Sampler() : temp_(0.0), top_k_(0) {}
 Sampler::Sampler(sampler_params_t params)
@@ -104,3 +108,6 @@ std::pair<uint64_t, float> Sampler::sample(std::vector<float> logits) {
     return top_k_sample_(logits);
   return greedy_(logits);
 }
+
+} // namespace internal
+} // namespace zinferlm

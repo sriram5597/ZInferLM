@@ -1,22 +1,21 @@
 #pragma once
 
-#include <bits/chrono.h>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <set>
 #include <string_view>
-#include <unordered_map>
-
 #include <variant>
-#include <zinferlm/models.h>
 
-using Clock = std::chrono::high_resolution_clock;
-using TimePoint = Clock::time_point;
+#include "zinferlm/export.h"
+#include "zinferlm/models.h"
+#include "zinferlm/types.h"
 
 namespace zinferlm {
 namespace events {
+
 struct tokenizer_started_event_t {
   TimePoint timestamp = Clock::now();
   size_t str_len;
@@ -70,11 +69,11 @@ struct listener_t {
   std::set<zinferlm::events::InferenceEvent> events;
 };
 
-class EventDispatcher {
+class ZINFERLM_API EventDispatcher {
 private:
-  std::map<int, listener_t> listeners;
+  std::map<std::string, std::vector<listener_t>> listeners;
+  std::mutex mutex_;
   int callbacks_count_ = 0;
-  int callback_seq_ = 1;
   EventDispatcher() = default;
 
 public:
@@ -82,12 +81,12 @@ public:
   EventDispatcher(EventDispatcher &&) = delete;
 
   static EventDispatcher &get_instance();
-  int listen(event_callback_t listener,
+  void listen(std::string group_id, event_callback_t listener,
              std::set<zinferlm::events::InferenceEvent> events);
-  void unlisten(int observer_id);
-  void dispatch(zinferlm::events::InferenceEvent event_name,
+  void unlisten(std::string group_id);
+  void dispatch(std::string group_id, zinferlm::events::InferenceEvent event_name,
                 zinferlm::events::inference_event_t event);
 };
 
-}; // namespace events
-}; // namespace zinferlm
+} // namespace events
+} // namespace zinferlm

@@ -1,13 +1,14 @@
 #pragma once
 
-#include <bits/chrono.h>
+#include <chrono>
 #include <cstdint>
 
-using Clock = std::chrono::high_resolution_clock;
-using TimePoint = Clock::time_point;
+#include "zinferlm/export.h"
+#include "zinferlm/types.h"
 
 namespace zinferlm {
 namespace metrics {
+
 struct model_metrics_t {
   float time_to_first_token;
   float throughput_in_secs;
@@ -19,9 +20,9 @@ struct model_metrics_t {
   long decode_time;
 };
 
-class LLMMetricsCollector {
+class ZINFERLM_API LLMMetricsCollector {
 private:
-  int observer_id_;
+  std::string run_id_;
   TimePoint prefill_start_time_, prefill_end_time_;
   TimePoint decode_start_time_, decode_end_time_;
   TimePoint tokenizer_start_time_, tokenizer_end_time_;
@@ -30,9 +31,11 @@ private:
   uint32_t out_tokens_, inp_tokens_;
 
 public:
+  LLMMetricsCollector(std::string run_id) : run_id_(run_id) {};
   void collect();
   model_metrics_t get_metrics();
   void reset();
 };
+
 } // namespace metrics
 } // namespace zinferlm

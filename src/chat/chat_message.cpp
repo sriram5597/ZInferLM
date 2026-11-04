@@ -1,9 +1,15 @@
-#include <minja/minja.hpp>
-#include <nlohmann/json.hpp>
+#include <iostream>
+#include <string>
 #include <string.h>
 
+#include <minja/chat-template.hpp>
+#include <minja/minja.hpp>
+#include <nlohmann/json.hpp>
+
 #include "chat_message.h"
-#include "minja/chat-template.hpp"
+
+namespace zinferlm {
+namespace internal {
 
 ChatTemplate ChatTemplate::from_str(std::string template_str,
                                     std::string bos_token,
@@ -30,3 +36,6 @@ std::string ChatTemplate::render(std::vector<zinferlm::ChatMessage> messages,
     return "";
   }
 }
+
+} // namespace internal
+} // namespace zinferlm

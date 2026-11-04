@@ -1,3 +1,4 @@
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/address.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -8,17 +9,14 @@
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/core/tcp_stream.hpp>
 #include <boost/beast/http.hpp>
-#include <boost/beast/http/message_fwd.hpp>
 #include <boost/beast/http/status.hpp>
 #include <boost/beast/version.hpp>
 #include <boost/config.hpp>
 #include <boost/json.hpp>
-#include <cstdint>
-#include <iostream>
 #include <memory>
+#include <mutex>
 #include <queue>
 #include <string>
-#include <thread>
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -29,7 +27,10 @@ namespace json = boost::json;
 class Session : public std::enable_shared_from_this<Session> {
 private:
   beast::tcp_stream stream_;
-  bool is_writing_;
+  net::strand<net::any_io_executor> strand_;
+  std::mutex queue_mutex_;
+  bool is_writing_ = false;
+  bool header_sent_ = false;
   http::request<http::string_body> req_;
   beast::flat_buffer buffer_;
   std::queue<std::string> streaming_queue_;
@@ -42,7 +43,9 @@ private:
   void flush_streaming_queue_();
 
 public:
-  explicit Session(tcp::socket &&socket) : stream_(std::move(socket)) {}
+  explicit Session(tcp::socket &&socket)
+      : stream_(std::move(socket)),
+        strand_(net::make_strand(stream_.socket().get_executor())) {}
   void send_json_response(http::status status, json::value payload);
   void initiate_streaming();
   void stream_json_message(json::value payload, bool is_end);

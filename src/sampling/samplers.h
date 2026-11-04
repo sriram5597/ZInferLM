@@ -3,6 +3,9 @@
 #include <cstdint>
 #include <vector>
 
+namespace zinferlm {
+namespace internal {
+
 struct sampler_params_t {
   float temperature;
   uint32_t top_k;
@@ -24,3 +27,6 @@ public:
   Sampler();
   std::pair<uint64_t, float> sample(std::vector<float> logits);
 };
+
+} // namespace internal
+} // namespace zinferlm

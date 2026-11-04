@@ -1,14 +1,16 @@
 #pragma once
 
 #include <cstdint>
+#include <ostream>
+#include <vector>
+
 #include <ggml-cpp.h>
 #include <ggml.h>
 
-#include <ostream>
-#include <vector>
-#include <zinferlm/models.h>
-
 #include "kv_cache/cache.h"
+
+namespace zinferlm {
+namespace internal {
 
 enum Layers {
   GROUPED_ATTN,
@@ -152,3 +154,6 @@ public:
   Block(block_params_t params);
   ggml_tensor *forward(ggml_tensor *x) const override;
 };
+
+} // namespace internal
+} // namespace zinferlm

@@ -2,45 +2,50 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 #include <variant>
 #include <vector>
-#include <unordered_map>
-#include <string_view>
+
 #include <zinferlm/models.h>
+
 #include "metadata.h"
+#include "model_loader/loader.h"
 #include "tensors.h"
 
+namespace zinferlm {
+namespace internal {
+
 // Header metadata key: "general.file_type"
-enum class gguf_file_type : uint32_t
-{
-  ALL_F32 = 0,         // All unquantized 32-bit floats [cite: 43]
-  MOSTLY_F16 = 1,      // Mostly 16-bit float weights [cite: 44]
-  MOSTLY_Q4_0 = 2,     // Mostly 4-bit uniform quantized (Q4_0) [cite: 45]
-  MOSTLY_Q4_1 = 3,     // Mostly 4-bit uniform quantized with zero-point (Q4_1) [cite: 45, 46]
-  MOSTLY_Q8_0 = 7,     // Mostly 8-bit uniform quantized (Q8_0) [cite: 46]
-  MOSTLY_Q5_0 = 8,     // Mostly 5-bit uniform quantized (Q5_0) [cite: 47]
-  MOSTLY_Q5_1 = 9,     // Mostly 5-bit uniform quantized with zero-point (Q5_1) [cite: 47, 48]
-  MOSTLY_Q2_K = 10,    // Mostly 2-bit K-quantized (Q2_K) [cite: 48]
-  MOSTLY_Q3_K_S = 11,  // Mostly 3-bit Small K-quantized (Q3_K_S) [cite: 49]
-  MOSTLY_Q3_K_M = 12,  // Mostly 3-bit Medium K-quantized (Q3_K_M) [cite: 49]
-  MOSTLY_Q3_K_L = 13,  // Mostly 3-bit Large K-quantized (Q3_K_L) [cite: 50]
-  MOSTLY_Q4_K_S = 14,  // Mostly 4-bit Small K-quantized (Q4_K_S) [cite: 50]
-  MOSTLY_Q4_K_M = 15,  // Mostly 4-bit Medium K-quantized (Q4_K_M) [cite: 51]
-  MOSTLY_Q5_K_S = 16,  // Mostly 5-bit Small K-quantized (Q5_K_S) [cite: 51]
-  MOSTLY_Q5_K_M = 17,  // Mostly 5-bit Medium K-quantized (Q5_K_M) [cite: 52]
-  MOSTLY_Q6_K = 18,    // Mostly 6-bit K-quantized (Q6_K) [cite: 52, 53]
-  MOSTLY_IQ2_XXS = 19, // Mostly 2-bit Importance Matrix (Extra Extra Small) [cite: 53]
-  MOSTLY_IQ2_XS = 20,  // Mostly 2-bit Importance Matrix (Extra Small) [cite: 54]
-  MOSTLY_Q2_K_S = 21,  // Mostly 2-bit Small K-quantized [cite: 54, 55]
-  MOSTLY_IQ3_XS = 22,  // Mostly 3-bit Importance Matrix (Extra Small) [cite: 55]
-  MOSTLY_IQ3_XXS = 23  // Mostly 3-bit Importance Matrix (Extra Extra Small) [cite: 55, 56]
+enum class gguf_file_type : uint32_t {
+  ALL_F32 = 0,         // All unquantized 32-bit floats
+  MOSTLY_F16 = 1,      // Mostly 16-bit float weights
+  MOSTLY_Q4_0 = 2,     // Mostly 4-bit uniform quantized (Q4_0)
+  MOSTLY_Q4_1 = 3,     // Mostly 4-bit uniform quantized with zero-point (Q4_1)
+  MOSTLY_Q8_0 = 7,     // Mostly 8-bit uniform quantized (Q8_0)
+  MOSTLY_Q5_0 = 8,     // Mostly 5-bit uniform quantized (Q5_0)
+  MOSTLY_Q5_1 = 9,     // Mostly 5-bit uniform quantized with zero-point (Q5_1)
+  MOSTLY_Q2_K = 10,    // Mostly 2-bit K-quantized (Q2_K)
+  MOSTLY_Q3_K_S = 11,  // Mostly 3-bit Small K-quantized (Q3_K_S)
+  MOSTLY_Q3_K_M = 12,  // Mostly 3-bit Medium K-quantized (Q3_K_M)
+  MOSTLY_Q3_K_L = 13,  // Mostly 3-bit Large K-quantized (Q3_K_L)
+  MOSTLY_Q4_K_S = 14,  // Mostly 4-bit Small K-quantized (Q4_K_S)
+  MOSTLY_Q4_K_M = 15,  // Mostly 4-bit Medium K-quantized (Q4_K_M)
+  MOSTLY_Q5_K_S = 16,  // Mostly 5-bit Small K-quantized (Q5_K_S)
+  MOSTLY_Q5_K_M = 17,  // Mostly 5-bit Medium K-quantized (Q5_K_M)
+  MOSTLY_Q6_K = 18,    // Mostly 6-bit K-quantized (Q6_K)
+  MOSTLY_IQ2_XXS = 19, // Mostly 2-bit Importance Matrix (Extra Extra Small)
+  MOSTLY_IQ2_XS = 20,  // Mostly 2-bit Importance Matrix (Extra Small)
+  MOSTLY_Q2_K_S = 21,  // Mostly 2-bit Small K-quantized
+  MOSTLY_IQ3_XS = 22,  // Mostly 3-bit Importance Matrix (Extra Small)
+  MOSTLY_IQ3_XXS = 23  // Mostly 3-bit Importance Matrix (Extra Extra Small)
 };
 
 // Helper function to convert GGUF file type to string
-constexpr const char *gguf_file_type_name(gguf_file_type type)
-{
-  switch (type)
-  {
+constexpr const char *gguf_file_type_name(gguf_file_type type) {
+  switch (type) {
   case gguf_file_type::ALL_F32:
     return "ALL_F32";
   case gguf_file_type::MOSTLY_F16:
@@ -88,18 +93,17 @@ constexpr const char *gguf_file_type_name(gguf_file_type type)
   }
 }
 
-struct gguf_header_t
-{
+struct gguf_header_t {
   uint32_t magic;
   uint32_t version;
   uint64_t tensor_count;
   uint64_t metadata_kv_count;
 };
 
-using metadata_map_t = std::unordered_map<std::string, std::unique_ptr<Metadata>>;
+using metadata_map_t =
+    std::unordered_map<std::string, std::unique_ptr<Metadata>>;
 
-class GGUFLoader : public zinferlm::ModelLoader
-{
+class GGUFLoader : public zinferlm::internal::ModelLoader {
 public:
   const gguf_header_t *header;
   metadata_map_t metadata;
@@ -114,8 +118,8 @@ public:
   void *get_tensor_ptr(uint64_t offset) const override;
 
   void set_tensor_base_ptr(const char *ptr);
-  void set_mapped_memory(std::unique_ptr<const char, std::function<void(const char *)>> mem)
-  {
+  void set_mapped_memory(
+      std::unique_ptr<const char, std::function<void(const char *)>> mem) {
     mapped_memory_ = std::move(mem);
   }
 
@@ -127,4 +131,7 @@ private:
 };
 
 bool is_gguf_file(int *);
-GGUFLoader* load_gguf_file(int *, size_t);
+GGUFLoader *load_gguf_file(int *, size_t);
+
+} // namespace internal
+} // namespace zinferlm

@@ -1,8 +1,12 @@
 #include <cstdint>
-#include <zinferlm/tokenizer.h>
 #include <memory>
 #include <string>
 #include <unordered_map>
+
+#include "tokenizer_impl.h"
+
+namespace zinferlm {
+namespace internal {
 
 SpecialTokenTrie::SpecialTokenTrie() {
   root = std::make_unique<trie_node_t>('\0');
@@ -10,10 +14,10 @@ SpecialTokenTrie::SpecialTokenTrie() {
 
 void SpecialTokenTrie::build_from_tokens(std::vector<std::string> &tokens,
                                          std::vector<int32_t> &token_types) {
-  int s= 0;
+  int s = 0;
   root = std::make_unique<trie_node_t>('\0');
   for (int i = 0; i < tokens.size(); i++) {
-    if (token_types[i] == zinferlm::token_type::TOKEN_TYPE_NORMAL) {
+    if (token_types[i] == token_type::TOKEN_TYPE_NORMAL) {
       continue;
     }
     std::string tok = tokens[i];
@@ -42,10 +46,12 @@ int SpecialTokenTrie::match(std::string &text, int start, int end) {
     }
     current = next.get();
     if (current->token_id >= 0) {
-      token_id = current -> token_id;
+      token_id = current->token_id;
     }
     i++;
   }
   return token_id;
 }
 
+} // namespace internal
+} // namespace zinferlm

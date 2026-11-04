@@ -20,12 +20,12 @@ int main(int argc, char *argv[]) {
 
   auto &model = zinferlm::Model::instance();
 
-  zinferlm::Chat chat(model);
+  zinferlm::Chat chat(model, "run-debug");
   chat.set_debug(true);
   std::vector<zinferlm::ChatMessage> messages = {zinferlm::UserMessage("hi")};
-  zinferlm::ChatMessage output =
-      chat.invoke(messages, {.max_tokens = 1, .temperature = 1.0});
-  std::cout << output.message << std::endl;
+  std::string output =
+      chat.invoke(messages, {.max_tokens = 1, .temperature = 1.0}).get();
+  std::cout << output << std::endl;
 
   zinferlm::Model::unload();
   return 0;

@@ -1,11 +1,20 @@
-#include "inference/inference.h"
-#include "worker/worker.hpp"
+#pragma once
+
 #include <cstdint>
 #include <future>
 #include <string>
 
+#include "inference/inference.h"
+#include "worker/worker.hpp"
+
+namespace zinferlm {
+namespace internal {
+
 struct inference_task_t {
-  zinferlm::Inference &inference;
+  std::string run_id;
+  zinferlm::Model &model;
+  bool debug;
+  Sampler sampler;
   std::string input;
   uint64_t max_tokens;
 };
@@ -19,3 +28,6 @@ private:
 public:
   static InferenceWorker &instance();
 };
+
+} // namespace internal
+} // namespace zinferlm
