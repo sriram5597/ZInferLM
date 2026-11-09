@@ -10,30 +10,24 @@ EventDispatcher &EventDispatcher::get_instance() {
   return instance;
 }
 
-void EventDispatcher::listen(
-    std::string group_id, zinferlm::events::event_callback_t listener,
-    std::set<zinferlm::events::InferenceEvent> events) {
+int EventDispatcher::listen(zinferlm::events::event_callback_t listener,
+                            std::set<zinferlm::events::InferenceEvent> events) {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (listeners.find(group_id) != listeners.end()) {
-    listeners[group_id].push_back(
-        {.callback = std::move(listener), .events = std::move(events)});
-  } else {
-    listeners.insert(
-        {group_id,
-         {{.callback = std::move(listener), .events = std::move(events)}}});
-  }
-  callbacks_count_++;
+  int id = next_id_++;
+  listeners.push_back(
+      {.id = id, .callback = std::move(listener), .events = std::move(events)});
+  return id;
 }
 
-void EventDispatcher::unlisten(std::string group_id) {
+void EventDispatcher::unlisten(int observer_id) {
   std::lock_guard<std::mutex> lock(mutex_);
-  int callbacks = listeners[group_id].size();
-  listeners.erase(group_id);
-  callbacks_count_ -= callbacks;
+  std::erase_if(listeners,
+                [observer_id](const zinferlm::events::listener_t &l) {
+                  return l.id == observer_id;
+                });
 }
 
-void EventDispatcher::dispatch(std::string group_id,
-                               zinferlm::events::InferenceEvent event_name,
+void EventDispatcher::dispatch(zinferlm::events::InferenceEvent event_name,
                                zinferlm::events::inference_event_t event) {
   // Snapshot the matching callbacks under lock, then invoke them outside the
   // lock so a callback may safely unlisten (or another thread may listen /
@@ -42,7 +36,7 @@ void EventDispatcher::dispatch(std::string group_id,
   {
     std::lock_guard<std::mutex> lock(mutex_);
     callbacks.reserve(listeners.size());
-    for (auto &it : listeners[group_id]) {
+    for (auto &it : listeners) {
       if (it.events.contains(event_name)) {
         callbacks.push_back(it.callback);
       }

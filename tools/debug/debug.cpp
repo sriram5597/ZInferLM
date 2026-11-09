@@ -20,7 +20,7 @@ int main(int argc, char *argv[]) {
 
   auto &model = zinferlm::Model::instance();
 
-  zinferlm::Chat chat(model, "run-debug");
+  zinferlm::Chat chat(model);
   chat.set_debug(true);
   std::vector<zinferlm::ChatMessage> messages = {zinferlm::UserMessage("hi")};
   std::string output =

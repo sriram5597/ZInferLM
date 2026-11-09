@@ -20,56 +20,6 @@ namespace internal {
 
 QwenModel::QwenModel(ModelLoader *l) : ModelImpl(l) {}
 
-void QwenModel::create_input_tensors(ggml_context *ctx, uint32_t n_tokens,
-                                     uint32_t max_len) {
-  ggml_tensor *input = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, n_tokens);
-  ggml_set_input(input);
-  ggml_set_name(input, "input");
-
-  ggml_tensor *positions = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, n_tokens);
-  ggml_set_input(positions);
-  ggml_set_name(positions, "positions");
-
-  ggml_tensor *mask = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, max_len, n_tokens);
-  ggml_set_input(mask);
-  ggml_set_name(mask, "mask");
-
-  input_tensors_ = {input, positions, mask};
-  max_context_len_ = max_len;
-}
-
-std::vector<ggml_tensor *> QwenModel::get_input_tensors() {
-  return input_tensors_;
-}
-
-void QwenModel::set_inputs(const std::vector<int32_t> &tokens,
-                           int past_tokens) {
-  ggml_tensor *input = input_tensors_[0];
-  ggml_tensor *positions = input_tensors_[1];
-  ggml_tensor *mask = input_tensors_[2];
-
-  ggml_backend_tensor_set(input, tokens.data(), 0,
-                          tokens.size() * sizeof(int32_t));
-
-  std::vector<int32_t> pos(tokens.size());
-  for (size_t i = 0; i < tokens.size(); i++) {
-    pos[i] = past_tokens + (int32_t)i;
-  }
-  ggml_backend_tensor_set(positions, pos.data(), 0,
-                          pos.size() * sizeof(int32_t));
-
-  std::vector<ggml_fp16_t> mask_data((size_t)max_context_len_ * tokens.size());
-  for (size_t q = 0; q < tokens.size(); q++) {
-    int pos_q = past_tokens + (int)q;
-    for (uint32_t k = 0; k < max_context_len_; k++) {
-      float v = ((int)k <= pos_q) ? 0.0f : -INFINITY;
-      mask_data[q * max_context_len_ + k] = ggml_fp32_to_fp16(v);
-    }
-  }
-  ggml_backend_tensor_set(mask, mask_data.data(), 0,
-                          mask_data.size() * sizeof(ggml_fp16_t));
-}
-
 ggml_tensor *QwenModel::build_graph(ggml_context *ctx, ggml_cgraph *gf,
                                     KVCache *cache) {
   uint32_t nblocks = loader_->model_config().n_blocks;
@@ -77,6 +27,8 @@ ggml_tensor *QwenModel::build_graph(ggml_context *ctx, ggml_cgraph *gf,
   ggml_tensor *input = input_tensors_[0];
   ggml_tensor *positions = input_tensors_[1];
   ggml_tensor *mask = input_tensors_[2];
+  ggml_tensor *lookup_rows = input_tensors_[3];
+  ggml_tensor *write_rows = input_tensors_[4];
 
   ggml_tensor *cur = input;
 
@@ -86,8 +38,9 @@ ggml_tensor *QwenModel::build_graph(ggml_context *ctx, ggml_cgraph *gf,
   for (uint32_t i = 0; i < nblocks; i++) {
     std::string blk = "blk." + std::to_string(i);
 
-    GroupedAttentionHead attn = create_attention_layer_(
-        ctx, gf, positions, mask, blk + ".attn", i, cache);
+    GroupedAttentionHead attn =
+        create_attention_layer_(ctx, gf, positions, mask, lookup_rows,
+                                write_rows, blk + ".attn", i, cache);
     cur = attn(cur);
 
     SwigLU ffn = create_ffn_layer_(ctx, blk + ".ffn", i);
@@ -120,7 +73,8 @@ TokenUnembedding QwenModel::create_output_layer_(ggml_context *ctx,
 
 GroupedAttentionHead QwenModel::create_attention_layer_(
     ggml_context *ctx, ggml_cgraph *gf, ggml_tensor *positions,
-    ggml_tensor *mask, std::string layer_name, int block_id, KVCache *cache) {
+    ggml_tensor *mask, ggml_tensor *lookup_rows, ggml_tensor *write_rows,
+    std::string layer_name, int block_id, KVCache *cache) {
   zinferlm::model_config_t config = loader_->model_config();
   ggml_tensor *q_w = get_tensor_(layer_name + "_q.weight");
   ggml_tensor *q_b = get_tensor_(layer_name + "_q.bias");
@@ -151,7 +105,9 @@ GroupedAttentionHead QwenModel::create_attention_layer_(
                                           .cache = cache,
                                           .gf = gf,
                                           .positions = positions,
-                                          .mask = mask};
+                                          .mask = mask,
+                                          .lookup_rows = lookup_rows,
+                                          .write_rows = write_rows};
   return GroupedAttentionHead(attn_params);
 }
 

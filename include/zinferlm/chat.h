@@ -45,12 +45,10 @@ public:
 class ZINFERLM_API Chat {
 private:
   zinferlm::Model &model_;
-  std::string chat_id_;
   bool debug_ = false;
 
 public:
-  Chat(zinferlm::Model &m, std::string chat_id)
-      : model_(m), chat_id_(chat_id) {}
+  Chat(zinferlm::Model &m) : model_(m) {}
   std::future<std::string> invoke(std::vector<ChatMessage> &messages,
                                   const zinferlm::chat_params_t &params);
   void set_debug(bool enabled) { debug_ = enabled; }

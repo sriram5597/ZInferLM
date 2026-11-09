@@ -1,74 +1,182 @@
 #include "cache.h"
 
+#include <algorithm>
+#include <cinttypes>
 #include <cstdint>
+#include <iostream>
+#include <memory>
+#include <mutex>
 #include <string>
+#include <utility>
 
 #include "ggml-cpp.h"
 #include "ggml.h"
+#include "zinferlm/models.h"
 
 namespace zinferlm {
 namespace internal {
 
+int KVCache::blocks_count() const { return 8 * max_len_ / block_size_; }
+
 KVCache::KVCache(ggml_backend *backend, int ctx_len, int layers, int n_kv,
-                 int d_head, ggml_type type = GGML_TYPE_F16)
-    : max_len_(ctx_len), layers_(layers), d_head_(d_head), n_kv_(n_kv) {
-  size_t ctx_size = 2 * layers * ggml_tensor_overhead() + layers * 128;
+                 int d_head, ggml_type type)
+    : max_len_(ctx_len), layers_(layers), d_head_(d_head), n_kv_(n_kv),
+      dtype_(type) {
+  block_size_ = 16;
+
+  free_.resize(blocks_count(), false);
+  blocks_.resize(blocks_count());
+  pool_.resize(layers_);
+
+  size_t ctx_size = 2 * layers_ * ggml_tensor_overhead() + layers_ * 128 + 2;
   ggml_init_params params = {
       .mem_size = ctx_size,
       .mem_buffer = nullptr,
       .no_alloc = true,
   };
   ctx_kv_ = ggml_context_ptr{ggml_init(params)};
-  for (int i = 0; i < layers; i++) {
-    layers_[i] = {
-        .K = ggml_new_tensor_2d(ctx_kv_.get(), type, d_head * n_kv_, ctx_len),
-        .V = ggml_new_tensor_2d(ctx_kv_.get(), type, d_head * n_kv_, ctx_len)};
-    ggml_set_name(layers_[i].K, ("cache_k_l" + std::to_string(i)).c_str());
-    ggml_set_name(layers_[i].V, ("cache_v_l" + std::to_string(i)).c_str());
+
+  for (int i = 0; i < layers_; i++) {
+    pool_[i].entry.K = ggml_new_tensor_3d(
+        ctx_kv_.get(), dtype_, d_head_ * n_kv_, block_size_, blocks_count());
+    pool_[i].entry.V = ggml_new_tensor_3d(
+        ctx_kv_.get(), dtype_, d_head_ * n_kv_, block_size_, blocks_count());
+    ggml_set_name(pool_[i].entry.K, ("cache->k_l" + std::to_string(i)).c_str());
+    ggml_set_name(pool_[i].entry.V, ("cache->v_l" + std::to_string(i)).c_str());
   }
+
   buffer_ = ggml_backend_buffer_ptr{ggml_backend_alloc_ctx_tensors_from_buft(
       ctx_kv_.get(), ggml_backend_get_default_buffer_type(backend))};
 }
 
 void KVCache::set_graph(ggml_cgraph *gf) { gf_ = gf; }
 
-void KVCache::reset() {}
-
-void KVCache::write_kv(ggml_context *ctx, int l, ggml_tensor *K, ggml_tensor *V,
-                       ggml_tensor *pos_idx) {
-  layer_kv_cache_t &cache = layers_[l];
-  const uint64_t seq_len = K->ne[2];
-  const uint64_t n_embed = d_head_ * n_kv_;
-
-  ggml_tensor *k_cur = ggml_view_2d(ctx, K, n_embed, seq_len,
-                                    ggml_row_size(K->type, n_embed), 0);
-  ggml_tensor *v_cur = ggml_view_2d(ctx, V, n_embed, seq_len,
-                                    ggml_row_size(V->type, n_embed), 0);
-
-  ggml_tensor *k_set = ggml_set_rows(ctx, cache.K, k_cur, pos_idx);
-  ggml_tensor *v_set = ggml_set_rows(ctx, cache.V, v_cur, pos_idx);
-
-  ggml_set_name(k_set, ("set_rows_k_l" + std::to_string(l)).c_str());
-  ggml_set_name(v_set, ("set_rows_v_l" + std::to_string(l)).c_str());
-
-  ggml_build_forward_expand(gf_, k_set);
-  ggml_build_forward_expand(gf_, v_set);
+void KVCache::reset() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  std::fill(free_.begin(), free_.end(), false);
+  for (auto &b : blocks_) {
+    b = {.seq_id = -1, .start_pos = 0, .num_entries = 0};
+  }
+  usage_table_.clear();
 }
 
-layer_kv_cache_t KVCache::get_slice(ggml_context *graph_ctx, int l) {
-  layer_kv_cache_t cache = layers_[l];
-  const uint64_t n_emb = d_head_ * n_kv_;
-  return {
-      .K = ggml_view_4d(graph_ctx, cache.K, d_head_, max_len_, n_kv_, 1,
-                        ggml_row_size(cache.K->type, n_emb),
-                        ggml_row_size(cache.K->type, d_head_),
-                        ggml_row_size(cache.K->type, n_emb * max_len_), 0),
-      .V = ggml_view_4d(graph_ctx, cache.V, d_head_, max_len_, n_kv_, 1,
-                        ggml_row_size(cache.V->type, n_emb),
-                        ggml_row_size(cache.V->type, d_head_),
-                        ggml_row_size(cache.V->type, n_emb * max_len_), 0),
+int KVCache::alloc_block() {
+  for (int i = 0; i < (int)free_.size(); i++) {
+    if (!free_[i]) {
+      free_[i] = true;
+      blocks_[i] = {.seq_id = -1, .start_pos = 0, .num_entries = 0};
+      return i;
+    }
+  }
+  return -1;
+}
 
-  };
+void KVCache::ensure_blocks(int seq_id, int filled) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto &&it = usage_table_.find(seq_id);
+  if (it == usage_table_.end()) {
+    usage_table_[seq_id] = {.seq_id = seq_id, .seq_len = 0};
+  }
+  kv_cache_usage_t& usage = usage_table_[seq_id];
+  int needed = (filled + block_size_ - 1) / block_size_;
+  while ((int)usage.block_list.size() < needed) {
+    int b = alloc_block();
+    if (b < 0) {
+      std::cerr << "[debug] ensure_blocks: OUT OF BLOCKS! seq=" << seq_id
+                << " filled=" << filled << " needed=" << needed
+                << " allocated=" << usage.block_list.size() << std::endl;
+      break;
+    }
+    usage.block_list.push_back(b);
+  }
+  std::cerr << "[debug] ensure_blocks: seq=" << seq_id << " filled=" << filled
+            << " needed=" << needed << " allocated=" << usage.block_list.size()
+            << " free_count=" << blocks_count() << std::endl;
+}
+
+void KVCache::free_blocks(int seq_id) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = usage_table_.find(seq_id);
+  if (it == usage_table_.end()) {
+    return;
+  }
+  for (int b : it->second.block_list) {
+    free_[b] = false;
+    blocks_[b] = {.seq_id = -1, .start_pos = 0, .num_entries = 0};
+  }
+  usage_table_.erase(it);
+}
+
+std::vector<int32_t> KVCache::get_lookup_rows(int seq_id, int filled) const {
+  const auto &blocks = usage_table_.at(seq_id).block_list;
+  std::vector<int32_t> rows(filled);
+  for (int p = 0; p < filled; p++) {
+    rows[p] = blocks[p / block_size_] * block_size_ + (p % block_size_);
+  }
+  return rows;
+}
+
+std::vector<int64_t> KVCache::get_write_rows(int seq_id, int past_tokens,
+                                              int n_tokens) const {
+  const auto &blocks = usage_table_.at(seq_id).block_list;
+  std::vector<int64_t> rows(n_tokens);
+  std::cerr << "[debug] get_write_rows: block_list.size=" << blocks.size()
+            << " blocks_count=" << blocks_count() << " past_tokens="
+            << past_tokens << " n_tokens=" << n_tokens << std::endl;
+  for (int i = 0; i < n_tokens; i++) {
+    int pos = past_tokens + i;
+    int logical = pos / block_size_;
+    if (logical >= (int)blocks.size()) {
+      std::cerr << "[debug] get_write_rows: OOB logical=" << logical
+                << " >= block_list.size=" << blocks.size() << std::endl;
+      break;
+    }
+    rows[i] = blocks[logical] * block_size_ + (pos % block_size_);
+  }
+  return rows;
+}
+
+void KVCache::write_kv(ggml_context *ctx, int layer, int seq_id, ggml_tensor *K,
+                       ggml_tensor *V, ggml_tensor *write_rows) {
+  const int emb_dim = d_head_ * n_kv_;
+  const int n_tokens = K->ne[2];
+  cache_entry_t &entry = pool_[layer].entry;
+  kv_cache_usage_t &usage = usage_table_[seq_id];
+
+  ggml_tensor *K_cached = ggml_view_2d(
+      ctx, entry.K, emb_dim, block_size_ * blocks_count(), entry.K->nb[1], 0);
+  ggml_tensor *V_cached = ggml_view_2d(
+      ctx, entry.V, emb_dim, block_size_ * blocks_count(), entry.V->nb[1], 0);
+
+  ggml_tensor *K_cur = ggml_reshape_2d(ctx, K, emb_dim, n_tokens);
+  ggml_tensor *V_cur = ggml_reshape_2d(ctx, V, emb_dim, n_tokens);
+
+  ggml_build_forward_expand(gf_,
+                            ggml_set_rows(ctx, K_cached, K_cur, write_rows));
+  ggml_build_forward_expand(gf_,
+                            ggml_set_rows(ctx, V_cached, V_cur, write_rows));
+  usage.seq_len += n_tokens;
+}
+
+std::pair<ggml_tensor *, ggml_tensor *>
+KVCache::get_slice(ggml_context *graph_ctx, int l, ggml_tensor *lookup_rows) {
+  cache_entry_t &entry = pool_[l].entry;
+  ggml_tensor *K_flat =
+      ggml_view_2d(graph_ctx, entry.K, entry.K->ne[0],
+                   block_size_ * blocks_count(), entry.K->nb[1], 0);
+  ggml_tensor *V_flat =
+      ggml_view_2d(graph_ctx, entry.V, entry.V->ne[0],
+                   block_size_ * blocks_count(), entry.V->nb[1], 0);
+  ggml_tensor *K_slice = ggml_get_rows(graph_ctx, K_flat, lookup_rows);
+  ggml_tensor *V_slice = ggml_get_rows(graph_ctx, V_flat, lookup_rows);
+
+  K_slice = ggml_view_3d(graph_ctx, K_slice, d_head_, lookup_rows->ne[0], n_kv_,
+                         ggml_row_size(K_slice->type, d_head_ * n_kv_),
+                         ggml_row_size(K_slice->type, d_head_), 0);
+  V_slice = ggml_view_3d(graph_ctx, V_slice, d_head_, lookup_rows->ne[0], n_kv_,
+                         ggml_row_size(V_slice->type, d_head_ * n_kv_),
+                         ggml_row_size(V_slice->type, d_head_), 0);
+  return std::make_pair(K_slice, V_slice);
 }
 
 } // namespace internal

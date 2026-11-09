@@ -18,6 +18,14 @@ option(BUILD_DEBUG "Build ZInferLM debug tool" ${BUILD_ALL})
 option(BUILD_TOKENIZE "Build ZInferLM tokenize tool" ${BUILD_ALL})
 option(BUILD_SERVER "Build ZinferLM Server" ${BUILD_ALL})
 
+option(ENABLE_ASAN "Enable Address Sanitizer" OFF)
+
+if (ENABLE_ASAN)
+  message(STATUS "AddressSanitizer is enabled")
+  add_compile_options(-fsanitize=address -fno-omit-frame-pointer -g)
+  add_link_options(-fsanitize=address)
+endif()
+
 set(GGML_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GGML_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 

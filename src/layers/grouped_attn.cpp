@@ -19,7 +19,7 @@ GroupedAttentionHead::GroupedAttentionHead(grouped_attn_head_params params)
       rope_freq_base_(params.rope_freq_base), apply_rope_(params.apply_rope),
       n_heads_(params.n_heads), n_kv_(params.n_kv),
       layer_index_(params.layer_index), cache_(params.cache), gf_(params.gf),
-      positions_(params.positions), mask_(params.mask) {
+      positions_(params.positions), mask_(params.mask), lookup_rows_(params.lookup_rows), write_rows_(params.write_rows) {
   name = "GroupedAttention";
 }
 
@@ -67,10 +67,10 @@ ggml_tensor *GroupedAttentionHead::forward(ggml_tensor *x) const {
   Q_cur = ggml_cont(ctx_, ggml_permute(ctx_, Q_cur, 0, 2, 1, 3));
 
   cache_->set_graph(gf_);
-  cache_->write_kv(ctx_, block_id_, K_cur, V_cur, positions_);
-  layer_kv_cache_t cached_entry = cache_->get_slice(ctx_, block_id_);
-  K_cur = cached_entry.K;
-  V_cur = cached_entry.V;
+  cache_->write_kv(ctx_, block_id_, 0, K_cur, V_cur, write_rows_);
+  std::pair<ggml_tensor*, ggml_tensor*> cached_entry = cache_->get_slice(ctx_, block_id_, lookup_rows_);
+  K_cur = cached_entry.first;
+  V_cur = cached_entry.second;
 
   ggml_tensor *KQV = ggml_flash_attn_ext(ctx_, Q_cur, K_cur, V_cur, mask_,
                                          1.0f / sqrtf(d_head), 0.0f, 0.0f);

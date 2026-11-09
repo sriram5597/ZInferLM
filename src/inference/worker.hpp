@@ -2,16 +2,17 @@
 
 #include <cstdint>
 #include <future>
+#include <memory>
 #include <string>
 
 #include "inference/inference.h"
+#include "kv_cache/cache.h"
 #include "worker/worker.hpp"
 
 namespace zinferlm {
 namespace internal {
 
 struct inference_task_t {
-  std::string run_id;
   zinferlm::Model &model;
   bool debug;
   Sampler sampler;
@@ -21,9 +22,12 @@ struct inference_task_t {
 
 class InferenceWorker : public Worker<inference_task_t, std::string> {
 private:
+  std::unique_ptr<KVCache> cache_;
+  std::unique_ptr<Inference> inference_;
   void execute_task_(inference_task_t &task,
                      std::promise<std::string> &result) override;
-  InferenceWorker() = default;
+  InferenceWorker();
+  std::vector<int32_t> tokenize(std::string input);
 
 public:
   static InferenceWorker &instance();

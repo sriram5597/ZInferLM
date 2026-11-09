@@ -42,7 +42,7 @@ void zinferlm::metrics::LLMMetricsCollector::collect() {
       events::InferenceEvent::PREFILL_COMPLETED,
       events::InferenceEvent::GENERATION_COMPLETED,
       events::InferenceEvent::TOKEN_GENERATED};
-  dispatcher.listen(run_id_, collector, events);
+  dispatcher.listen(collector, events);
 }
 
 zinferlm::metrics::model_metrics_t

@@ -3,11 +3,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <map>
 #include <mutex>
 #include <set>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 #include "zinferlm/export.h"
 #include "zinferlm/models.h"
@@ -65,15 +65,16 @@ enum InferenceEvent {
 using event_callback_t = std::function<void(zinferlm::events::inference_event_t)>;
 
 struct listener_t {
+  int id;
   event_callback_t callback;
   std::set<zinferlm::events::InferenceEvent> events;
 };
 
 class ZINFERLM_API EventDispatcher {
 private:
-  std::map<std::string, std::vector<listener_t>> listeners;
+  std::vector<listener_t> listeners;
   std::mutex mutex_;
-  int callbacks_count_ = 0;
+  int next_id_ = 0;
   EventDispatcher() = default;
 
 public:
@@ -81,10 +82,10 @@ public:
   EventDispatcher(EventDispatcher &&) = delete;
 
   static EventDispatcher &get_instance();
-  void listen(std::string group_id, event_callback_t listener,
+  int listen(event_callback_t listener,
              std::set<zinferlm::events::InferenceEvent> events);
-  void unlisten(std::string group_id);
-  void dispatch(std::string group_id, zinferlm::events::InferenceEvent event_name,
+  void unlisten(int observer_id);
+  void dispatch(zinferlm::events::InferenceEvent event_name,
                 zinferlm::events::inference_event_t event);
 };
 

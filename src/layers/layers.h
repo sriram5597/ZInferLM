@@ -102,6 +102,8 @@ struct grouped_attn_head_params {
   ggml_cgraph *gf = nullptr;
   ggml_tensor *positions = nullptr;
   ggml_tensor *mask = nullptr;
+  ggml_tensor* lookup_rows = nullptr;
+  ggml_tensor* write_rows = nullptr;
 };
 
 class GroupedAttentionHead : public Layer {
@@ -116,6 +118,8 @@ private:
   ggml_cgraph *gf_;
   ggml_tensor *positions_;
   ggml_tensor *mask_;
+  ggml_tensor* lookup_rows_;
+  ggml_tensor* write_rows_;
 
 public:
   GroupedAttentionHead(grouped_attn_head_params);

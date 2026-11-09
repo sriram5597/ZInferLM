@@ -83,10 +83,10 @@ void chat_completion(Session &session, json::object req_payload) {
   }
 
   auto current_session = session.shared_from_this();
-  std::string chat_id = generate_chatcmpl_id();
+  auto observer_id = std::make_shared<int>(-1);
 
   zinferlm::events::event_callback_t cb =
-      [current_session, &chat_id](zinferlm::events::inference_event_t event) {
+      [current_session, observer_id](zinferlm::events::inference_event_t event) {
         if (auto generated_event =
                 std::get_if<zinferlm::events::token_generated_event_t>(
                     &event)) {
@@ -106,7 +106,8 @@ void chat_completion(Session &session, json::object req_payload) {
             payload = {{"finish_reason", "Stop"}};
           }
           current_session->stream_json_message(payload, true);
-          zinferlm::events::EventDispatcher::get_instance().unlisten(chat_id);
+          zinferlm::events::EventDispatcher::get_instance().unlisten(
+              *observer_id);
         }
       };
 
@@ -121,10 +122,10 @@ void chat_completion(Session &session, json::object req_payload) {
     std::set<zinferlm::events::InferenceEvent> events = {
         zinferlm::events::InferenceEvent::GENERATION_COMPLETED,
         zinferlm::events::InferenceEvent::TOKEN_GENERATED};
-    dispatcher.listen(chat_id, cb, events);
+    *observer_id = dispatcher.listen(cb, events);
   }
 
-  zinferlm::Chat chat(zinferlm::Model::instance(), chat_id);
+  zinferlm::Chat chat(zinferlm::Model::instance());
   std::future<std::string> result = chat.invoke(chat_messages, params);
 
   if (!streaming) {

@@ -29,8 +29,7 @@ std::future<std::string> Chat::invoke(std::vector<ChatMessage> &messages,
   internal::InferenceWorker &worker = internal::InferenceWorker::instance();
   std::promise<std::string> out_promise;
   std::future<std::string> future = out_promise.get_future();
-  internal::inference_task_t task = {.run_id = chat_id_,
-                                     .model = model_,
+  internal::inference_task_t task = {.model = model_,
                                      .debug = debug_,
                                      .sampler = sampler,
                                      .input = std::move(chat_message),
