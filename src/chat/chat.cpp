@@ -21,17 +21,16 @@ std::future<std::string> Chat::invoke(std::vector<ChatMessage> &messages,
 
   std::string chat_message = chat_template.render(messages, true);
 
-  internal::Sampler sampler(
+  internal::sampler_params_t sampler_params =
       internal::sampler_params_t{.temperature = params.temperature,
                                  .top_k = params.top_k,
-                                 .top_p = params.top_p});
+                                 .top_p = params.top_p};
 
   internal::InferenceWorker &worker = internal::InferenceWorker::instance();
   std::promise<std::string> out_promise;
   std::future<std::string> future = out_promise.get_future();
-  internal::inference_task_t task = {.model = model_,
-                                     .debug = debug_,
-                                     .sampler = sampler,
+  internal::inference_task_t task = {.task_id = params.chat_id,
+                                     .sample_config = sampler_params,
                                      .input = std::move(chat_message),
                                      .max_tokens = params.max_tokens};
   worker.add_task(task, std::move(out_promise));

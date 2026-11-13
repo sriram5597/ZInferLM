@@ -1,25 +1,30 @@
 #include <zinferlm/chat.h>
-#include <zinferlm/events.h>
+#include <cstdint>
 #include <cstdlib>
+#include <future>
 #include <iostream>
-#include <set>
 #include <string>
 #include <vector>
 #include <zinferlm/metrics.h>
 #include <zinferlm/models.h>
 #include <zinferlm/tokenizer.h>
 
-std::function<void()> cleanup;
-
 static void sigint_handler(int) {
   std::cout << "\n";
-  if (cleanup) {
-    cleanup();
-  }
   _exit(0);
 }
 
-using InferenceEvent = zinferlm::events::InferenceEvent;
+static std::vector<std::string> split(const std::string &s,
+                                      const std::string &delim) {
+  std::vector<std::string> parts;
+  size_t start = 0, end;
+  while ((end = s.find(delim, start)) != std::string::npos) {
+    parts.push_back(s.substr(start, end - start));
+    start = end + delim.size();
+  }
+  parts.push_back(s.substr(start));
+  return parts;
+}
 
 int main(int argc, char *argv[]) {
   if (argc < 2) {
@@ -51,40 +56,7 @@ int main(int argc, char *argv[]) {
   zinferlm::metrics::LLMMetricsCollector metrics_collector("run-1");
   metrics_collector.collect();
 
-  zinferlm::events::event_callback_t cb =
-      [](zinferlm::events::inference_event_t event) -> void {
-    if (auto generated_event =
-            std::get_if<zinferlm::events::token_generated_event_t>(&event)) {
-      std::cout << "\033[33m" << generated_event->token;
-      std::cout.flush();
-    }
-    if (auto completed_event =
-            std::get_if<zinferlm::events::generation_completed_event_t>(
-                &event)) {
-      zinferlm::StreamStatus status = completed_event->status;
-      if (status == zinferlm::StreamStatus::MAX_CTX_REACHED) {
-        std::cout << "\nMaximum Context Reached\n";
-        std::cout.flush();
-      }
-      if (status == zinferlm::StreamStatus::EOS) {
-        std::cout << std::endl;
-        std::cout.flush();
-      }
-      std::cout << "\033[0m";
-    }
-  };
-
-  zinferlm::events::EventDispatcher &dispatcher =
-      zinferlm::events::EventDispatcher::get_instance();
-
-  std::set<InferenceEvent> events = {InferenceEvent::GENERATION_COMPLETED,
-                                     InferenceEvent::TOKEN_GENERATED};
-  int observer_id = dispatcher.listen(cb, events);
-  cleanup = [&dispatcher, observer_id]() -> void {
-    dispatcher.unlisten(observer_id);
-  };
-
-  std::vector<zinferlm::ChatMessage> messages;
+  uint64_t chat_id_counter = 1;
 
   std::cout << "\nEnter a prompt (Ctrl+C to exit):\n";
   std::string input;
@@ -112,28 +84,47 @@ int main(int argc, char *argv[]) {
       }
       continue;
     }
-    zinferlm::Chat chat(model);
-    zinferlm::UserMessage user_message = zinferlm::UserMessage(input);
-    messages.push_back(user_message);
-    const zinferlm::chat_params_t params = {
-      .max_tokens=8192,
-      .temperature=0.5,
-      .top_p=0.7,
-    };
-    zinferlm::ChatMessage out_msg = zinferlm::AssistantMessage(
-        chat.invoke(messages, params).get());
-    messages.push_back(out_msg);
-    zinferlm::metrics::model_metrics_t metrics =
-        metrics_collector.get_metrics();
-    std::cout << "\033[35m"
-              << "Time-to-Frist-Token (ms): " << metrics.time_to_first_token
-              << " | Decode Time (ms): " << metrics.decode_time
-              << " | Total Time (ms): " << metrics.total_time
-              << " | Token/s: " << metrics.throughput_in_secs
-              << " | Input Tokens: " << metrics.inp_tokens
-              << " | Output Tokens: " << metrics.out_tokens << "\033[0m"
-              << std::endl;
-    metrics_collector.reset();
+    std::vector<std::string> prompts = split(input, ";;;");
+
+    std::vector<std::future<std::string>> futures;
+    std::vector<std::string> chat_ids;
+    futures.reserve(prompts.size());
+    chat_ids.reserve(prompts.size());
+
+    for (const auto &prompt : prompts) {
+      if (prompt.empty())
+        continue;
+
+      zinferlm::Chat chat(model);
+      std::vector<zinferlm::ChatMessage> messages{zinferlm::UserMessage(prompt)};
+      const zinferlm::chat_params_t params = {
+          .chat_id = std::to_string(chat_id_counter),
+          .max_tokens = 8192,
+          .temperature = 0.5,
+          .top_p = 0.7,
+      };
+      futures.emplace_back(chat.invoke(messages, params));
+      chat_ids.emplace_back(std::to_string(chat_id_counter));
+      ++chat_id_counter;
+    }
+
+    for (size_t i = 0; i < futures.size(); ++i) {
+      std::string out = futures[i].get();
+      std::cout << "ChatID: " << chat_ids[i] << "\n"
+                << out << "\n"
+                << "--\n";
+    }
+    // zinferlm::metrics::model_metrics_t metrics =
+    //     metrics_collector.get_metrics();
+    // std::cout << "\033[35m"
+    //           << "Time-to-Frist-Token (ms): " << metrics.time_to_first_token
+    //           << " | Decode Time (ms): " << metrics.decode_time
+    //           << " | Total Time (ms): " << metrics.total_time
+    //           << " | Token/s: " << metrics.throughput_in_secs
+    //           << " | Input Tokens: " << metrics.inp_tokens
+    //           << " | Output Tokens: " << metrics.out_tokens << "\033[0m"
+    //           << std::endl;
+    // metrics_collector.reset();
   }
 
   zinferlm::Model::unload();

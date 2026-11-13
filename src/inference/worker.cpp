@@ -1,12 +1,9 @@
-#include <exception>
+#include <cstdint>
 #include <future>
-#include <memory>
 #include <string>
 #include <vector>
 
-#include "inference/inference.h"
-#include "kv_cache/cache.h"
-#include "models/model_impl.h"
+#include "scheduler.hpp"
 #include "worker.hpp"
 #include "zinferlm/events.h"
 #include "zinferlm/models.h"
@@ -15,15 +12,7 @@
 namespace zinferlm {
 namespace internal {
 
-InferenceWorker::InferenceWorker() {
-  zinferlm::model_config_t cfg = zinferlm::Model::instance().config();
-  ModelImpl &model_impl = zinferlm::Model::instance().impl();
-  cache_ = std::make_unique<KVCache>(
-      model_impl.get_backend(), cfg.max_context_len, cfg.n_blocks, cfg.nkv,
-      cfg.embedding_dim / cfg.nheads, GGML_TYPE_F16);
-  inference_ =
-      std::make_unique<Inference>(cache_.get(), zinferlm::Model::instance());
-}
+InferenceWorker::InferenceWorker() {}
 
 InferenceWorker &InferenceWorker::instance() {
   static InferenceWorker worker;
@@ -46,17 +35,19 @@ std::vector<int32_t> InferenceWorker::tokenize(std::string input) {
   return tokens;
 }
 
-void InferenceWorker::execute_task_(inference_task_t &task,
-                                    std::promise<std::string> &promise) {
-  try {
-    inference_->set_debug(task.debug);
-    inference_->set_sampler(task.sampler);
-    std::string out = inference_->invoke(task.input, task.max_tokens);
-    promise.set_value(out);
-  } catch (...) {
-    promise.set_exception(std::current_exception());
-  }
+void InferenceWorker::execute_task_() {
+  std::pair<inference_task_t, std::promise<std::string>> task =
+      std::move(get_task_());
+  std::vector<int32_t> tokens = tokenize(task.first.input);
+  seq_info_t seq_info = {.seq_id = task.first.task_id,
+                         .past_tokens = 0,
+                         .seq_len = 0,
+                         .max_tokens = task.first.max_tokens,
+                         .sample_config = task.first.sample_config,
+                         .promise = std::move(task.second),
+                         .inp_tokens = tokens};
+  InferenceScheduler &scheduler = InferenceScheduler::instance();
+  scheduler.submit(std::move(seq_info));
 }
-
 } // namespace internal
 } // namespace zinferlm

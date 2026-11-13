@@ -67,7 +67,7 @@ ggml_tensor *GroupedAttentionHead::forward(ggml_tensor *x) const {
   Q_cur = ggml_cont(ctx_, ggml_permute(ctx_, Q_cur, 0, 2, 1, 3));
 
   cache_->set_graph(gf_);
-  cache_->write_kv(ctx_, block_id_, 0, K_cur, V_cur, write_rows_);
+  cache_->write_kv(ctx_, block_id_, K_cur, V_cur, write_rows_);
   std::pair<ggml_tensor*, ggml_tensor*> cached_entry = cache_->get_slice(ctx_, block_id_, lookup_rows_);
   K_cur = cached_entry.first;
   V_cur = cached_entry.second;

@@ -9,6 +9,7 @@ add_library(zinferlm SHARED
     ./tokenizer/tokenizer_impl.cpp ./tokenizer/tokenizer_impl.h
     ./tokenizer/special_token_vocab.cpp
     ./inference/inference.cpp ./inference/inference.h
+    ./inference/scheduler.hpp ./inference/scheduler.cpp
     ./inference/worker.cpp ./inference/worker.hpp
     ./engine/tensors.cpp ./engine/tensors.h
     ./engine/debug.cpp ./engine/debug.h

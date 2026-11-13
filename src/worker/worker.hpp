@@ -1,15 +1,16 @@
 #pragma once
 
-#include <atomic>
 #include <condition_variable>
 #include <exception>
 #include <future>
 #include <mutex>
 #include <queue>
+#include <stop_token>
 #include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace zinferlm {
 namespace internal {
@@ -24,32 +25,46 @@ public:
 
 template <typename T, typename R> class Worker {
 protected:
-  std::thread worker_thread_;
-  std::atomic<bool> running_{false};
-  std::condition_variable cv_;
+  int max_workers_ = 1;
+  std::stop_source stop_source_;
+  std::vector<std::jthread> worker_threads_;
+  std::condition_variable_any cv_;
   std::mutex task_lock_;
   std::queue<std::pair<T, std::promise<R>>> tasks_;
-  virtual void execute_task_(T &task, std::promise<R> &result) = 0;
+  std::pair<T, std::promise<R>> get_task_();
+  virtual void execute_task_() = 0;
   Worker();
 
 public:
   ~Worker();
-  void run();
+  void run(std::stop_token tok);
   void add_task(T &task, std::promise<R> result);
   void stop();
 };
 
 template <typename T, typename R> Worker<T, R>::Worker() {
-  running_.store(true);
-  worker_thread_ = std::thread([this]() { this->run(); });
+  worker_threads_.reserve(max_workers_);
+  std::stop_token tok = stop_source_.get_token();
+  for (int i = 0; i < max_workers_; i++) {
+    worker_threads_.emplace_back(
+        std::jthread([this, tok]() { this->run(tok); }));
+  }
 }
 
-template <typename T, typename R> void Worker<T, R>::run() {
+template <typename T, typename R>
+std::pair<T, std::promise<R>> Worker<T, R>::get_task_() {
+  std::lock_guard<std::mutex> lock(task_lock_);
+  auto task = std::move(tasks_.front());
+  tasks_.pop();
+  return task;
+}
+
+template <typename T, typename R> void Worker<T, R>::run(std::stop_token tok) {
   while (true) {
     std::unique_lock<std::mutex> lock(task_lock_);
-    cv_.wait(lock, [this] { return !tasks_.empty() || !running_; });
+    cv_.wait(lock, tok, [this] { return !tasks_.empty(); });
 
-    if (!running_) {
+    if (tok.stop_requested()) {
       // Shutdown: cancel every queued task so no caller's future.get() hangs.
       while (!tasks_.empty()) {
         tasks_.front().second.set_exception(
@@ -58,12 +73,8 @@ template <typename T, typename R> void Worker<T, R>::run() {
       }
       break;
     }
-
-    std::pair<T, std::promise<R>> task = std::move(tasks_.front());
-    tasks_.pop();
     lock.unlock();
-
-    execute_task_(task.first, task.second);
+    execute_task_();
   }
 }
 
@@ -71,27 +82,22 @@ template <typename T, typename R>
 void Worker<T, R>::add_task(T &task, std::promise<R> result) {
   {
     std::lock_guard<std::mutex> lock(task_lock_);
-    if (!running_.load()) {
+    if (stop_source_.stop_requested()) {
       throw worker_stopped("worker is stopped");
     }
     tasks_.emplace(task, std::move(result));
   }
-  cv_.notify_one();
+  cv_.notify_all();
 }
 
 template <typename T, typename R> Worker<T, R>::~Worker() { stop(); }
 
 template <typename T, typename R> void Worker<T, R>::stop() {
-  {
-    std::lock_guard<std::mutex> lock(task_lock_);
-    if (!running_.load()) {
-      return;
+  stop_source_.request_stop();
+  for (auto &t : worker_threads_) {
+    if (t.joinable()) {
+      t.join();
     }
-    running_.store(false);
-  }
-  cv_.notify_all();
-  if (worker_thread_.joinable()) {
-    worker_thread_.join();
   }
 }
 

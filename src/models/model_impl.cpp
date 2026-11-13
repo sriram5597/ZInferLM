@@ -92,20 +92,8 @@ ggml_tensor *ModelImpl::get_tensor_(std::string name) {
   return nullptr;
 }
 
-void ModelImpl::build_mask(std::vector<ggml_fp16_t> &mask, int past_tokens,
-                           const int size) {
-  int filled = past_tokens + size;
-  for (int i = 0; i < size; i++) {
-    int pos = past_tokens + i;
-    for (int j = 0; j < filled; j++) {
-      float m = j <= pos ? 0.0f : -INFINITY;
-      mask[i * filled + j] = ggml_fp32_to_fp16(m);
-    }
-  }
-}
-
-void ModelImpl::create_input_tensors(ggml_context *ctx, uint32_t n_tokens,
-                                     uint32_t past_tokens) {
+void ModelImpl::create_input_tensors(ggml_context *ctx, 
+                                     size_t n_tokens, size_t total_filled) {
   ggml_tensor *input = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, n_tokens);
   ggml_set_input(input);
   ggml_set_name(input, "input");
@@ -115,12 +103,12 @@ void ModelImpl::create_input_tensors(ggml_context *ctx, uint32_t n_tokens,
   ggml_set_name(positions, "positions");
 
   ggml_tensor *mask =
-      ggml_new_tensor_2d(ctx, GGML_TYPE_F16, past_tokens + n_tokens, n_tokens);
+      ggml_new_tensor_2d(ctx, GGML_TYPE_F16, total_filled, n_tokens);
   ggml_set_input(mask);
   ggml_set_name(mask, "mask");
 
   ggml_tensor *lookup_rows =
-      ggml_new_tensor_1d(ctx, GGML_TYPE_I32, past_tokens + n_tokens);
+      ggml_new_tensor_1d(ctx, GGML_TYPE_I32, total_filled);
   ggml_set_input(lookup_rows);
   ggml_set_name(lookup_rows, "lookup_rows");
 
@@ -135,35 +123,23 @@ std::vector<ggml_tensor *> ModelImpl::get_input_tensors() {
   return input_tensors_;
 }
 
-void ModelImpl::set_inputs(const std::vector<int32_t> &tokens, int past_tokens,
-                           std::vector<int32_t> cache_lookup,
-                           std::vector<int64_t> write_pos) {
-  ggml_tensor *input = input_tensors_[0];
+void ModelImpl::set_inputs(const model_input_t &input) {
+  ggml_tensor *tokens = input_tensors_[0];
   ggml_tensor *positions = input_tensors_[1];
   ggml_tensor *mask = input_tensors_[2];
   ggml_tensor *lookup_rows = input_tensors_[3];
   ggml_tensor *write_rows = input_tensors_[4];
 
-  ggml_backend_tensor_set(input, tokens.data(), 0,
-                          tokens.size() * sizeof(int32_t));
-
-  std::vector<int32_t> pos(tokens.size());
-  for (size_t i = 0; i < tokens.size(); i++) {
-    pos[i] = past_tokens + (int32_t)i;
-  }
-  ggml_backend_tensor_set(positions, pos.data(), 0,
-                          pos.size() * sizeof(int32_t));
-
-  const int filled = past_tokens + tokens.size();
-  std::vector<ggml_fp16_t> mask_data((size_t)filled * tokens.size());
-  build_mask(mask_data, past_tokens, tokens.size());
-  ggml_backend_tensor_set(mask, mask_data.data(), 0,
-                          mask_data.size() * sizeof(ggml_fp16_t));
-
-  ggml_backend_tensor_set(lookup_rows, cache_lookup.data(), 0,
-                          cache_lookup.size() * sizeof(int32_t));
-  ggml_backend_tensor_set(write_rows, write_pos.data(), 0,
-                          write_pos.size() * sizeof(int64_t));
+  ggml_backend_tensor_set(tokens, input.tokens.data(), 0,
+                          input.tokens.size() * sizeof(int32_t));
+  ggml_backend_tensor_set(positions, input.positions.data(), 0,
+                          input.positions.size() * sizeof(int32_t));
+  ggml_backend_tensor_set(mask, input.causal_mask.data(), 0,
+                          input.causal_mask.size() * sizeof(ggml_fp16_t));
+  ggml_backend_tensor_set(lookup_rows, input.cache_lookup_rows.data(), 0,
+                          input.cache_lookup_rows.size() * sizeof(int32_t));
+  ggml_backend_tensor_set(write_rows, input.cache_write_rows.data(), 0,
+                          input.cache_write_rows.size() * sizeof(int64_t));
 }
 
 zinferlm::model_info_t ModelImpl::info() const { return loader_->info(); }

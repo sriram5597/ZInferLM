@@ -100,6 +100,7 @@ void Listener::do_accept() {
         if (ec) {
           return;
         }
+        std::cout << "connection accepted..." << std::endl;
         std::make_shared<Session>(std::move(socket))->run();
         do_accept();
       });

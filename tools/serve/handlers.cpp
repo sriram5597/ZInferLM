@@ -86,7 +86,8 @@ void chat_completion(Session &session, json::object req_payload) {
   auto observer_id = std::make_shared<int>(-1);
 
   zinferlm::events::event_callback_t cb =
-      [current_session, observer_id](zinferlm::events::inference_event_t event) {
+      [current_session,
+       observer_id](zinferlm::events::inference_event_t event) {
         if (auto generated_event =
                 std::get_if<zinferlm::events::token_generated_event_t>(
                     &event)) {
@@ -113,9 +114,10 @@ void chat_completion(Session &session, json::object req_payload) {
 
   zinferlm::events::EventDispatcher &dispatcher =
       zinferlm::events::EventDispatcher::get_instance();
+  std::string chat_id = generate_chatcmpl_id();
 
   zinferlm::chat_params_t params = {
-      .max_tokens = 8192, .temperature = 0.9, .top_p = 0.7};
+      .chat_id = chat_id, .max_tokens = 8192, .temperature = 0.9, .top_p = 0.7};
 
   if (streaming) {
     session.initiate_streaming();

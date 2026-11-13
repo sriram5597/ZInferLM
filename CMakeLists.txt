@@ -41,6 +41,10 @@ if(BUILD_TOKENIZE)
   add_subdirectory(tools/tokenize)
 endif()
 
+if (BUILD_CLI)
+  add_subdirectory(tools/cli)
+endif()
+
 if (BUILD_SERVER)
   add_subdirectory(tools/serve)
 endif()

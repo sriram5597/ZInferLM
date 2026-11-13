@@ -1,8 +1,10 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <ggml-backend.h>
@@ -12,6 +14,7 @@
 
 #include "engine/debug.h"
 #include "kv_cache/cache.h"
+#include "models/model_impl.h"
 #include "sampling/samplers.h"
 
 namespace zinferlm {
@@ -38,18 +41,19 @@ private:
   DebugCallbackData debug_cb_data_;
 
   ggml_context *init_context(uint64_t op_estimate);
-  ggml_cgraph *new_graph(uint32_t n_tokens, uint32_t max_context_len);
+  ggml_cgraph *new_graph(size_t n_tokens, size_t total_filled);
   void set_output(ggml_tensor *out);
   bool prepare();
-  ggml_tensor *compute(std::vector<int32_t> input, int past_tokens);
+  void compute(const model_input_t &input);
   bool reserve_memory();
-  std::vector<float> predict(std::vector<int32_t> tokens, int past_tokens);
 
 public:
-  explicit Inference(KVCache *cache,
-                     zinferlm::Model &model);
+  explicit Inference(KVCache *cache, zinferlm::Model &model);
   ~Inference();
   std::string invoke(std::string input, uint32_t max_tokens);
+  std::pair<std::vector<float>, int64_t>
+  predict(const model_input_t &input, size_t n_tokens, size_t total_filled);
+
   void set_debug(bool enabled) { debug_ = enabled; }
   void set_sampler(Sampler &sampler) { sampler_ = sampler; }
 };

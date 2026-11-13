@@ -19,6 +19,15 @@ namespace internal {
 
 class KVCache;
 
+struct model_input_t {
+  std::vector<int32_t> tokens;
+  std::vector<int32_t> positions;
+  std::vector<ggml_fp16_t> causal_mask;
+  std::vector<int32_t> cache_lookup_rows;
+  std::vector<int64_t> cache_write_rows;
+  std::vector<int32_t> offsets;
+};
+
 // Internal model implementation interface. Concrete models (e.g. QwenModel)
 // derive from this and implement the graph-building surface. This is the
 // engine-facing counterpart of the public Model facade and is never exposed.
@@ -32,12 +41,10 @@ public:
                                    KVCache *cache) = 0;
   virtual void summary() = 0;
 
-  void create_input_tensors(ggml_context *ctx, uint32_t n_tokens,
-                            uint32_t past_tokens);
+  void create_input_tensors(ggml_context *ctx, size_t n_tokens,
+                            size_t total_filled);
   std::vector<ggml_tensor *> get_input_tensors();
-  void set_inputs(const std::vector<int32_t> &tokens, int past_tokens,
-                  std::vector<int32_t> cache_lookup,
-                  std::vector<int64_t> write_rows);
+  void set_inputs(const model_input_t &input);
 
   // Metadata passthrough.
   zinferlm::model_info_t info() const;

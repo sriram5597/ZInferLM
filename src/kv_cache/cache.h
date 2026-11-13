@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <unordered_map>
@@ -42,6 +43,7 @@ private:
   int n_kv_;
   int layers_;
   int block_size_;
+  int blocks_used_;
   ggml_type dtype_;
   ggml_cgraph *gf_;
 
@@ -64,12 +66,12 @@ public:
 
   void set_graph(ggml_cgraph *gf);
   void reset();
-  void ensure_blocks(int seq_id, int filled);
+  void ensure_blocks(int seq_id, size_t filled);
   void free_blocks(int seq_id);
-  std::vector<int32_t> get_lookup_rows(int seq_id, int filled) const;
-  std::vector<int64_t> get_write_rows(int seq_id, int past_tokens,
-                                       int n_tokens) const;
-    void write_kv(ggml_context * ctx, int layer, int seq_id, ggml_tensor *K,
+  std::vector<int32_t> get_lookup_rows(int seq_id, size_t filled) const;
+  std::vector<int64_t> get_write_rows(int seq_id, size_t past_tokens,
+                                       size_t n_tokens) const;
+    void write_kv(ggml_context * ctx, int layer, ggml_tensor *K,
                   ggml_tensor *V, ggml_tensor *write_rows);
     std::pair<ggml_tensor *, ggml_tensor *> get_slice(
         ggml_context * graph_ctx, int layer, ggml_tensor *lookup_rows);

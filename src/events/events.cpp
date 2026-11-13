@@ -10,21 +10,20 @@ EventDispatcher &EventDispatcher::get_instance() {
   return instance;
 }
 
-int EventDispatcher::listen(zinferlm::events::event_callback_t listener,
+int EventDispatcher::listen(std::string listener_id,
+                            zinferlm::events::event_callback_t listener,
                             std::set<zinferlm::events::InferenceEvent> events) {
   std::lock_guard<std::mutex> lock(mutex_);
   int id = next_id_++;
-  listeners.push_back(
-      {.id = id, .callback = std::move(listener), .events = std::move(events)});
+  listeners_.emplace(listener_id, listener_t{.id = listener_id,
+                                             .callback = std::move(listener),
+                                             .events = std::move(events)});
   return id;
 }
 
-void EventDispatcher::unlisten(int observer_id) {
+void EventDispatcher::unlisten(std::string listener_id) {
   std::lock_guard<std::mutex> lock(mutex_);
-  std::erase_if(listeners,
-                [observer_id](const zinferlm::events::listener_t &l) {
-                  return l.id == observer_id;
-                });
+  listeners_.erase(listener_id);
 }
 
 void EventDispatcher::dispatch(zinferlm::events::InferenceEvent event_name,
@@ -35,10 +34,10 @@ void EventDispatcher::dispatch(zinferlm::events::InferenceEvent event_name,
   std::vector<zinferlm::events::event_callback_t> callbacks;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    callbacks.reserve(listeners.size());
-    for (auto &it : listeners) {
-      if (it.events.contains(event_name)) {
-        callbacks.push_back(it.callback);
+    callbacks.reserve(listeners_.size());
+    for (auto &it : listeners_) {
+      if (it.second.events.contains(event_name)) {
+        callbacks.push_back(it.second.callback);
       }
     }
   }

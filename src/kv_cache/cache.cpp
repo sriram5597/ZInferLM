@@ -21,7 +21,7 @@ int KVCache::blocks_count() const { return 8 * max_len_ / block_size_; }
 KVCache::KVCache(ggml_backend *backend, int ctx_len, int layers, int n_kv,
                  int d_head, ggml_type type)
     : max_len_(ctx_len), layers_(layers), d_head_(d_head), n_kv_(n_kv),
-      dtype_(type) {
+      dtype_(type), blocks_used_(0) {
   block_size_ = 16;
 
   free_.resize(blocks_count(), false);
@@ -65,21 +65,22 @@ int KVCache::alloc_block() {
     if (!free_[i]) {
       free_[i] = true;
       blocks_[i] = {.seq_id = -1, .start_pos = 0, .num_entries = 0};
+      blocks_used_ += 1;
       return i;
     }
   }
   return -1;
 }
 
-void KVCache::ensure_blocks(int seq_id, int filled) {
+void KVCache::ensure_blocks(int seq_id, size_t filled) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto &&it = usage_table_.find(seq_id);
   if (it == usage_table_.end()) {
     usage_table_[seq_id] = {.seq_id = seq_id, .seq_len = 0};
   }
-  kv_cache_usage_t& usage = usage_table_[seq_id];
-  int needed = (filled + block_size_ - 1) / block_size_;
-  while ((int)usage.block_list.size() < needed) {
+  kv_cache_usage_t &usage = usage_table_[seq_id];
+  size_t needed = (filled + block_size_ - 1) / block_size_;
+  while (usage.block_list.size() < needed) {
     int b = alloc_block();
     if (b < 0) {
       std::cerr << "[debug] ensure_blocks: OUT OF BLOCKS! seq=" << seq_id
@@ -91,7 +92,7 @@ void KVCache::ensure_blocks(int seq_id, int filled) {
   }
   std::cerr << "[debug] ensure_blocks: seq=" << seq_id << " filled=" << filled
             << " needed=" << needed << " allocated=" << usage.block_list.size()
-            << " free_count=" << blocks_count() << std::endl;
+            << " free_count=" << blocks_count() - blocks_used_ << std::endl;
 }
 
 void KVCache::free_blocks(int seq_id) {
@@ -103,45 +104,48 @@ void KVCache::free_blocks(int seq_id) {
   for (int b : it->second.block_list) {
     free_[b] = false;
     blocks_[b] = {.seq_id = -1, .start_pos = 0, .num_entries = 0};
+    blocks_used_--;
   }
   usage_table_.erase(it);
 }
 
-std::vector<int32_t> KVCache::get_lookup_rows(int seq_id, int filled) const {
+std::vector<int32_t> KVCache::get_lookup_rows(int seq_id, size_t filled) const {
   const auto &blocks = usage_table_.at(seq_id).block_list;
   std::vector<int32_t> rows(filled);
-  for (int p = 0; p < filled; p++) {
-    rows[p] = blocks[p / block_size_] * block_size_ + (p % block_size_);
+  for (size_t p = 0; p < filled; p++) {
+    rows[p] = blocks[p / block_size_] * block_size_ +
+              static_cast<int>(p % block_size_);
   }
   return rows;
 }
 
-std::vector<int64_t> KVCache::get_write_rows(int seq_id, int past_tokens,
-                                              int n_tokens) const {
+std::vector<int64_t> KVCache::get_write_rows(int seq_id, size_t past_tokens,
+                                             size_t n_tokens) const {
   const auto &blocks = usage_table_.at(seq_id).block_list;
   std::vector<int64_t> rows(n_tokens);
   std::cerr << "[debug] get_write_rows: block_list.size=" << blocks.size()
-            << " blocks_count=" << blocks_count() << " past_tokens="
-            << past_tokens << " n_tokens=" << n_tokens << std::endl;
-  for (int i = 0; i < n_tokens; i++) {
-    int pos = past_tokens + i;
-    int logical = pos / block_size_;
-    if (logical >= (int)blocks.size()) {
+            << " blocks_count=" << blocks_count()
+            << " past_tokens=" << past_tokens << " n_tokens=" << n_tokens
+            << std::endl;
+  for (size_t i = 0; i < n_tokens; i++) {
+    size_t pos = past_tokens + i;
+    size_t logical = pos / block_size_;
+    if (logical >= blocks.size()) {
       std::cerr << "[debug] get_write_rows: OOB logical=" << logical
                 << " >= block_list.size=" << blocks.size() << std::endl;
       break;
     }
-    rows[i] = blocks[logical] * block_size_ + (pos % block_size_);
+    rows[i] = blocks[logical] * block_size_ +
+              static_cast<int>(pos % block_size_);
   }
   return rows;
 }
 
-void KVCache::write_kv(ggml_context *ctx, int layer, int seq_id, ggml_tensor *K,
+void KVCache::write_kv(ggml_context *ctx, int layer, ggml_tensor *K,
                        ggml_tensor *V, ggml_tensor *write_rows) {
   const int emb_dim = d_head_ * n_kv_;
   const int n_tokens = K->ne[2];
   cache_entry_t &entry = pool_[layer].entry;
-  kv_cache_usage_t &usage = usage_table_[seq_id];
 
   ggml_tensor *K_cached = ggml_view_2d(
       ctx, entry.K, emb_dim, block_size_ * blocks_count(), entry.K->nb[1], 0);
@@ -155,7 +159,6 @@ void KVCache::write_kv(ggml_context *ctx, int layer, int seq_id, ggml_tensor *K,
                             ggml_set_rows(ctx, K_cached, K_cur, write_rows));
   ggml_build_forward_expand(gf_,
                             ggml_set_rows(ctx, V_cached, V_cur, write_rows));
-  usage.seq_len += n_tokens;
 }
 
 std::pair<ggml_tensor *, ggml_tensor *>

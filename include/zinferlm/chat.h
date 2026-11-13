@@ -14,6 +14,7 @@
 namespace zinferlm {
 
 struct chat_params_t {
+  std::string chat_id;
   uint32_t max_tokens;
   float temperature;
   uint32_t top_k;
