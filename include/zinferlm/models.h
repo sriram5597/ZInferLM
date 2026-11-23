@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -48,7 +49,7 @@ struct tensor_info_t {
   std::vector<uint64_t> dimensions;
 };
 
-enum StreamStatus { CONTINUE, EOS, MAX_CTX_REACHED };
+enum StreamStatus { CONTINUE, EOS, MAX_CTX_REACHED, CANCELLED };
 
 // Opaque implementation details. Declared here only so the facade can hold a
 // pointer to them; their definitions live in src/ and are never exposed.
@@ -69,13 +70,17 @@ public:
   Model &operator=(Model &&) = delete;
 
   static bool load(const char *model_path);
-  static void unload();
+  // Unloads the model. Returns false and leaves the model loaded when the
+  // inference engine is still running: call Chat::stop() first.
+  static bool unload();
   static Model &instance();
 
   model_info_t info() const;
   tokenizer_info_t tokenizer_info() const;
   std::vector<tensor_info_t> tensor_info() const;
   model_config_t config() const;
+  // Bytes of weight data held by the model.
+  std::size_t size() const { return size_; }
   void summary();
 
   // Opaque accessor for library-internal callers only. The returned type is
@@ -84,6 +89,7 @@ public:
 
 private:
   std::unique_ptr<internal::ModelImpl> impl_;
+  std::size_t size_ = 0;
   static std::unique_ptr<Model> instance_;
 };
 

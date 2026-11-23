@@ -33,7 +33,7 @@ struct model_input_t {
 // engine-facing counterpart of the public Model facade and is never exposed.
 class ModelImpl {
 public:
-  explicit ModelImpl(ModelLoader *loader);
+  explicit ModelImpl(ModelLoader *loader, bool cpu_only = false);
   virtual ~ModelImpl();
 
   // Graph-building surface (implemented by concrete models).
@@ -56,9 +56,19 @@ public:
   ggml_backend *get_backend();
   std::vector<ggml_backend *> backends() const;
   static enum ggml_backend_dev_type get_backend_type();
+  bool use_gpu() const;
 
   // Tensor loading.
+  void create_tensor_structs();
+  void mark_tensors_external();
   void load_tensors();
+
+  // All weight tensor structs (no data access implied).
+  std::vector<ggml_tensor *> tensors() const;
+  // Bytes of weight data, summed over the tensor structs.
+  uint64_t size() const { return model_size_; }
+  // Host arena used for the tensor metadata (as reserved by the ctor).
+  size_t tensor_metadata_size() const;
 
 protected:
   ggml_tensor *get_tensor_(std::string name);
@@ -68,11 +78,13 @@ protected:
   std::unique_ptr<ModelLoader> loader_;
   std::vector<ggml_backend_ptr> backends_;
   std::vector<ggml_tensor *> input_tensors_;
+  uint64_t model_size_ = 0;
   void build_mask(std::vector<ggml_fp16_t> &mask, const int filled,
                   const int size);
 
 private:
   ggml_backend_buffer_ptr tensor_buffer_;
+  bool cpu_only_ = false;
 };
 
 } // namespace internal

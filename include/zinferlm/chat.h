@@ -13,6 +13,8 @@
 
 namespace zinferlm {
 
+struct scheduler_config_t;
+
 struct chat_params_t {
   std::string chat_id;
   uint32_t max_tokens;
@@ -53,6 +55,12 @@ public:
   std::future<std::string> invoke(std::vector<ChatMessage> &messages,
                                   const zinferlm::chat_params_t &params);
   void set_debug(bool enabled) { debug_ = enabled; }
+
+  // Stops the inference engine: cancels in-flight work, joins every engine
+  // thread and releases engine resources. Must be called before
+  // Model::unload(). Static because the engine is process-wide, even though a
+  // Chat object is created per request.
+  static void stop();
 };
 
 struct chat_task_t {

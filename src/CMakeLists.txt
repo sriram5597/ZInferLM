@@ -11,18 +11,23 @@ add_library(zinferlm SHARED
     ./inference/inference.cpp ./inference/inference.h
     ./inference/scheduler.hpp ./inference/scheduler.cpp
     ./inference/worker.cpp ./inference/worker.hpp
+    ./engine/engine.h ./engine/engine.cpp ./engine/lifecycle.h
+    ./engine/memplan.h ./engine/memplan.cpp ./engine/measure.h
     ./engine/tensors.cpp ./engine/tensors.h
     ./engine/debug.cpp ./engine/debug.h
     ./layers/layers.h ./layers/token_emb.cpp ./layers/token_unemb.cpp
     ./layers/block.cpp ./layers/grouped_attn.cpp ./layers/swiglu.cpp
     ./kv_cache/cache.h ./kv_cache/cache.cpp
     ./chat/chat_message.h ./chat/chat_message.cpp
-    ./chat/chat.cpp ./metrics/metrics.cpp
+    ./chat/chat.cpp 
+    # ./metrics/metrics.cpp
     ./events/events.cpp
+    ./logging/log.h ./logging/log.cpp
     ./sampling/samplers.h ./sampling/samplers.cpp 
     ./models/qwen/model.cpp ./models/qwen/model.h
     ./models/model_impl.cpp ./models/model_impl.h
     ./models/models.cpp
+    ./config/config.cpp
 )
 
 target_sources(zinferlm
@@ -34,7 +39,8 @@ target_sources(zinferlm
       ${CMAKE_SOURCE_DIR}/include/zinferlm/tokenizer.h
       ${CMAKE_SOURCE_DIR}/include/zinferlm/chat.h
       ${CMAKE_SOURCE_DIR}/include/zinferlm/events.h
-      ${CMAKE_SOURCE_DIR}/include/zinferlm/metrics.h
+      ${CMAKE_SOURCE_DIR}/include/zinferlm/config.hpp
+      # ${CMAKE_SOURCE_DIR}/include/zinferlm/metrics.h
 )
 
 
@@ -80,12 +86,16 @@ FetchContent_MakeAvailable(minja)
 
 
 target_include_directories(zinferlm
+  PUBLIC
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/ggml/include
   PRIVATE
     ${PCRE2_INCLUDE_DIRS}
-    ${CMAKE_SOURCE_DIR}/src
 )
 
-target_link_libraries(zinferlm PRIVATE ${PCRE2_LIBRARIES} minja ggml)
+find_package(Threads REQUIRED)
+
+target_link_libraries(zinferlm PRIVATE ${PCRE2_LIBRARIES} minja ggml Threads::Threads)
 
 if (TARGET ggml-cuda)
   set(CMAKE_CUDA_HOST_COMPILER "/usr/bin/g++-14" CACHE FILEPATH "Host compiler for NVCC" FORCE)
@@ -94,10 +104,13 @@ if (TARGET ggml-cuda)
 endif()
 
 # Hide all symbols by default; only ZINFERLM_API-annotated symbols are exported.
-set_target_properties(zinferlm PROPERTIES
-  CXX_VISIBILITY_PRESET hidden
-  VISIBILITY_INLINES_HIDDEN ON
-)
+# Debug builds export everything so gdb can see/call internal symbols.
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+  set_target_properties(zinferlm PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+  )
+endif()
 
 include(GNUInstallDirs)
 

@@ -18,7 +18,8 @@
 namespace zinferlm {
 namespace internal {
 
-QwenModel::QwenModel(ModelLoader *l) : ModelImpl(l) {}
+QwenModel::QwenModel(ModelLoader *l, bool cpu_only)
+    : ModelImpl(l, cpu_only) {}
 
 ggml_tensor *QwenModel::build_graph(ggml_context *ctx, ggml_cgraph *gf,
                                     KVCache *cache) {

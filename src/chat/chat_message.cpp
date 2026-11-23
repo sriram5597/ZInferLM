@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include "chat_message.h"
+#include "logging/log.h"
 
 namespace zinferlm {
 namespace internal {
@@ -32,7 +33,7 @@ std::string ChatTemplate::render(std::vector<zinferlm::ChatMessage> messages,
     inputs.add_generation_prompt = add_generation_prompt;
     return tmpl_.apply(inputs);
   } catch (const std::exception err) {
-    std::cout << "Failed to render template: " << err.what() << std::endl;
+    LOG_ERR("Failed to render template: %s\n", err.what());
     return "";
   }
 }

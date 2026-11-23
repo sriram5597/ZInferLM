@@ -13,14 +13,16 @@
 #include <ggml-cuda.h>
 #endif
 
+#include "engine/measure.h"
 #include "engine/tensors.h"
+#include "logging/log.h"
 #include "model_impl.h"
 
 namespace zinferlm {
 namespace internal {
 
-ModelImpl::ModelImpl(ModelLoader *loader)
-    : loader_(std::unique_ptr<ModelLoader>{loader}) {
+ModelImpl::ModelImpl(ModelLoader *loader, bool cpu_only)
+    : loader_(std::unique_ptr<ModelLoader>{loader}), cpu_only_(cpu_only) {
   ggml_init_params params = {.mem_size = loader_->get_tensor_count() *
                                          ggml_tensor_overhead(),
                              .mem_buffer = nullptr,
@@ -30,15 +32,41 @@ ModelImpl::ModelImpl(ModelLoader *loader)
   ggml_backend_ptr cpu_backend = ggml_backend_ptr{ggml_backend_cpu_init()};
   backends_.push_back(std::move(cpu_backend));
 #if defined(CUDA_ENABLED) && CUDA_ENABLED
-  if (get_backend_type() == GGML_BACKEND_DEVICE_TYPE_GPU) {
-    std::cout << "Using cuda backend.." << std::endl;
+  if (!cpu_only_ && get_backend_type() == GGML_BACKEND_DEVICE_TYPE_GPU) {
+    LOG_INF("Using cuda backend..\n");
     ggml_backend_ptr cuda_backend = ggml_backend_ptr{ggml_backend_cuda_init(0)};
-    backends_.insert(backends_.begin(), std::move(cuda_backend));
+    if (cuda_backend) {
+      backends_.insert(backends_.begin(), std::move(cuda_backend));
+    } else {
+      LOG_WRN("cuda backend unavailable, falling back to cpu\n");
+    }
   }
 #endif
 }
 
 ModelImpl::~ModelImpl() = default;
+
+bool ModelImpl::use_gpu() const {
+#if defined(CUDA_ENABLED) && CUDA_ENABLED
+  return !cpu_only_ &&
+         get_backend_type() == GGML_BACKEND_DEVICE_TYPE_GPU;
+#else
+  return false;
+#endif
+}
+
+size_t ModelImpl::tensor_metadata_size() const {
+  return loader_->get_tensor_count() * ggml_tensor_overhead();
+}
+
+std::vector<ggml_tensor *> ModelImpl::tensors() const {
+  std::vector<ggml_tensor *> out;
+  out.reserve(tensor_map_.size());
+  for (const auto &[name, tensor] : tensor_map_) {
+    out.push_back(tensor);
+  }
+  return out;
+}
 
 enum ggml_backend_dev_type ModelImpl::get_backend_type() {
   enum ggml_backend_dev_type backend_type = GGML_BACKEND_DEVICE_TYPE_CPU;
@@ -59,13 +87,27 @@ std::vector<ggml_backend *> ModelImpl::backends() const {
   return ptrs;
 }
 
-void ModelImpl::load_tensors() {
+void ModelImpl::create_tensor_structs() {
+  model_size_ = 0;
   for (auto &t_info : loader_->tensor_info()) {
     ggml_tensor *t = create_tensor(tensor_ctx_.get(), t_info);
     tensor_map_[t_info.name] = t;
+    model_size_ += ggml_nbytes(t);
   }
-  if (get_backend_type() == GGML_BACKEND_DEVICE_TYPE_GPU) {
-    std::cout << "setting buffer..." << std::endl;
+}
+
+void ModelImpl::mark_tensors_external() {
+  for (auto &[name, tensor] : tensor_map_) {
+    mark_external_tensor(tensor);
+  }
+}
+
+void ModelImpl::load_tensors() {
+  if (tensor_map_.empty()) {
+    create_tensor_structs();
+  }
+  if (use_gpu()) {
+    LOG_DBG("setting buffer...\n");
     tensor_buffer_ =
         ggml_backend_buffer_ptr{ggml_backend_alloc_ctx_tensors_from_buft(
             tensor_ctx_.get(),
@@ -74,7 +116,7 @@ void ModelImpl::load_tensors() {
 
   for (auto &t_info : loader_->tensor_info()) {
     ggml_tensor *t = get_tensor_(t_info.name);
-    if (get_backend_type() != GGML_BACKEND_DEVICE_TYPE_CPU) {
+    if (use_gpu()) {
       GGML_ASSERT(tensor_buffer_.get() != NULL && "tensor buffer not set");
       ggml_backend_tensor_set(t, loader_->get_tensor_ptr(t_info.data_offset), 0,
                               ggml_nbytes(t));
@@ -82,6 +124,8 @@ void ModelImpl::load_tensors() {
       t->data = loader_->get_tensor_ptr(t_info.data_offset);
     }
   }
+  LOG_INF("Tensors loaded: tensors=%zu model_size=%zu\n", tensor_map_.size(),
+          (size_t)model_size_);
 }
 
 ggml_tensor *ModelImpl::get_tensor_(std::string name) {
@@ -92,8 +136,8 @@ ggml_tensor *ModelImpl::get_tensor_(std::string name) {
   return nullptr;
 }
 
-void ModelImpl::create_input_tensors(ggml_context *ctx, 
-                                     size_t n_tokens, size_t total_filled) {
+void ModelImpl::create_input_tensors(ggml_context *ctx, size_t n_tokens,
+                                     size_t total_filled) {
   ggml_tensor *input = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, n_tokens);
   ggml_set_input(input);
   ggml_set_name(input, "input");

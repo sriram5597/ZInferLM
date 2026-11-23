@@ -15,6 +15,7 @@
 #include <zinferlm/models.h>
 
 #include "gguf.h"
+#include "logging/log.h"
 #include "metadata.h"
 #include "tensors.h"
 
@@ -59,7 +60,7 @@ bool is_gguf_file(int *fd) {
 GGUFLoader *load_gguf_file(int *fd, size_t file_size) {
   void *raw_map = mmap(nullptr, file_size, PROT_READ, MAP_PRIVATE, *fd, 0);
   if (raw_map == MAP_FAILED) {
-    std::cerr << "Error loading gguf file" << std::endl;
+    LOG_ERR("Error loading gguf file\n");
     return nullptr;
   }
   const char *base_ptr = static_cast<const char *>(raw_map);

@@ -6,8 +6,8 @@
 #include <mutex>
 #include <set>
 #include <string_view>
-#include <variant>
 #include <unordered_map>
+#include <variant>
 
 #include "zinferlm/export.h"
 #include "zinferlm/models.h"
@@ -27,15 +27,16 @@ struct tokenizer_completed_event_t {
 };
 
 struct token_generated_event_t {
-  uint32_t seq_id;
+  std::string seq_id;
   std::string_view token;
+  size_t pos;
   TimePoint timestamp = Clock::now();
 };
 
 struct generation_completed_event_t {
   TimePoint timestamp = Clock::now();
   zinferlm::StreamStatus status;
-  uint32_t num_tokens;
+  size_t num_tokens;
 };
 
 struct prefill_start_event_t {
@@ -62,10 +63,12 @@ enum InferenceEvent {
   PREFILL_COMPLETED,
 };
 
-using event_callback_t = std::function<void(zinferlm::events::inference_event_t)>;
+using event_callback_t =
+    std::function<void(zinferlm::events::inference_event_t)>;
 
 struct listener_t {
   std::string id;
+  bool capture_all_events;
   event_callback_t callback;
   std::set<zinferlm::events::InferenceEvent> events;
 };
@@ -83,9 +86,9 @@ public:
 
   static EventDispatcher &get_instance();
   int listen(std::string listener_id, event_callback_t listener,
-             std::set<zinferlm::events::InferenceEvent> events);
+             std::set<zinferlm::events::InferenceEvent> events, bool capture_all_events=false);
   void unlisten(std::string listener_id);
-  void dispatch(zinferlm::events::InferenceEvent event_name,
+  void dispatch(std::string source_id, zinferlm::events::InferenceEvent event_name,
                 zinferlm::events::inference_event_t event);
 };
 

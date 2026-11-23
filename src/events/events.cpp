@@ -12,12 +12,12 @@ EventDispatcher &EventDispatcher::get_instance() {
 
 int EventDispatcher::listen(std::string listener_id,
                             zinferlm::events::event_callback_t listener,
-                            std::set<zinferlm::events::InferenceEvent> events) {
+                            std::set<zinferlm::events::InferenceEvent> events, bool capture_all_events) {
   std::lock_guard<std::mutex> lock(mutex_);
   int id = next_id_++;
   listeners_.emplace(listener_id, listener_t{.id = listener_id,
-                                             .callback = std::move(listener),
-                                             .events = std::move(events)});
+                                             .capture_all_events=capture_all_events,
+                                             .callback = std::move(listener), .events = std::move(events)});
   return id;
 }
 
@@ -26,7 +26,7 @@ void EventDispatcher::unlisten(std::string listener_id) {
   listeners_.erase(listener_id);
 }
 
-void EventDispatcher::dispatch(zinferlm::events::InferenceEvent event_name,
+void EventDispatcher::dispatch(std::string source_id, zinferlm::events::InferenceEvent event_name,
                                zinferlm::events::inference_event_t event) {
   // Snapshot the matching callbacks under lock, then invoke them outside the
   // lock so a callback may safely unlisten (or another thread may listen /
@@ -37,6 +37,9 @@ void EventDispatcher::dispatch(zinferlm::events::InferenceEvent event_name,
     callbacks.reserve(listeners_.size());
     for (auto &it : listeners_) {
       if (it.second.events.contains(event_name)) {
+        if (!it.second.capture_all_events && it.second.id != source_id) {
+          continue;
+        }
         callbacks.push_back(it.second.callback);
       }
     }

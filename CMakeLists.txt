@@ -17,6 +17,7 @@ option(BUILD_CLI "Build ZInferLM CLI" ${BUILD_ALL})
 option(BUILD_DEBUG "Build ZInferLM debug tool" ${BUILD_ALL})
 option(BUILD_TOKENIZE "Build ZInferLM tokenize tool" ${BUILD_ALL})
 option(BUILD_SERVER "Build ZinferLM Server" ${BUILD_ALL})
+option(BUILD_MEMPLAN "Build ZInferLM memory planner" ${BUILD_ALL})
 
 option(ENABLE_ASAN "Enable Address Sanitizer" OFF)
 
@@ -47,4 +48,8 @@ endif()
 
 if (BUILD_SERVER)
   add_subdirectory(tools/serve)
+endif()
+
+if (BUILD_MEMPLAN)
+  add_subdirectory(tools/memplan)
 endif()

@@ -5,36 +5,40 @@
 #include <sstream>
 #include <string>
 
+#include "../log_flags.h"
+#include "logging/log.h"
+
 int main(int argc, char *argv[])
 {
-  if (argc < 4)
+  auto args = zinferlm_tools::parse_log_flags(argc, argv);
+  if (args.size() < 3)
   {
-    std::cerr << "Usage: " << argv[0] << " <model_path> -f <filename>\n";
+    LOG_ERR("Usage: %s <model_path> -f <filename> %s\n", argv[0],
+            zinferlm_tools::log_flags_usage());
     return 1;
   }
 
-  std::string model_path = argv[1];
+  std::string model_path = args[0];
   std::string filename;
 
-  for (int i = 2; i < argc; i++)
+  for (size_t i = 1; i < args.size(); i++)
   {
-    std::string arg = argv[i];
-    if (arg == "-f" && i + 1 < argc)
+    if (args[i] == "-f" && i + 1 < args.size())
     {
-      filename = argv[++i];
+      filename = args[++i];
     }
   }
 
   if (filename.empty())
   {
-    std::cerr << "Error: -f <filename> is required\n";
+    LOG_ERR("Error: -f <filename> is required\n");
     return 1;
   }
 
   std::ifstream file(filename);
   if (!file.is_open())
   {
-    std::cerr << "Error: Could not open file: " << filename << "\n";
+    LOG_ERR("Error: Could not open file: %s\n", filename.c_str());
     return 1;
   }
 
@@ -45,7 +49,7 @@ int main(int argc, char *argv[])
   auto is_loaded = zinferlm::Model::load(model_path.c_str());
   if (!is_loaded)
   {
-    std::cerr << "Failed to load model: " << model_path << "\n";
+    LOG_ERR("Failed to load model: %s\n", model_path.c_str());
     return 1;
   }
 

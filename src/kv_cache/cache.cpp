@@ -3,26 +3,35 @@
 #include <algorithm>
 #include <cinttypes>
 #include <cstdint>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <utility>
 
+#include "engine/measure.h"
 #include "ggml-cpp.h"
 #include "ggml.h"
+#include "logging/log.h"
 #include "zinferlm/models.h"
 
 namespace zinferlm {
 namespace internal {
 
-int KVCache::blocks_count() const { return 8 * max_len_ / block_size_; }
+size_t KVCache::blocks_count() const { return 4 * max_len_ / block_size_; }
 
 KVCache::KVCache(ggml_backend *backend, int ctx_len, int layers, int n_kv,
-                 int d_head, ggml_type type)
+                 int d_head, ggml_type type, bool measure_only)
     : max_len_(ctx_len), layers_(layers), d_head_(d_head), n_kv_(n_kv),
       dtype_(type), blocks_used_(0) {
   block_size_ = 16;
+  size_per_block_ =
+      2ull * layers_ * d_head_ * n_kv_ * block_size_ * ggml_type_size(type);
+  LOG_INF("Creating kv cache layers=%d, block_size=%d, total_blocks=%zu, "
+          "size_per_block=%zu, reserved_size=%zu, measure_only=%d\n",
+          layers, block_size_, blocks_count(), size_per_block_,
+          size_per_block_ * blocks_count(), (int)measure_only);
 
   free_.resize(blocks_count(), false);
   blocks_.resize(blocks_count());
@@ -45,8 +54,27 @@ KVCache::KVCache(ggml_backend *backend, int ctx_len, int layers, int n_kv,
     ggml_set_name(pool_[i].entry.V, ("cache->v_l" + std::to_string(i)).c_str());
   }
 
-  buffer_ = ggml_backend_buffer_ptr{ggml_backend_alloc_ctx_tensors_from_buft(
-      ctx_kv_.get(), ggml_backend_get_default_buffer_type(backend))};
+  if (measure_only) {
+    // No device allocation: the pool owns its own buffer in a real run, so the
+    // compute-buffer planner must not count it.
+    for (int i = 0; i < layers_; i++) {
+      mark_external_tensor(pool_[i].entry.K);
+      mark_external_tensor(pool_[i].entry.V);
+    }
+  } else {
+    buffer_ = ggml_backend_buffer_ptr{ggml_backend_alloc_ctx_tensors_from_buft(
+        ctx_kv_.get(), ggml_backend_get_default_buffer_type(backend))};
+  }
+}
+
+std::vector<ggml_tensor *> KVCache::tensors() const {
+  std::vector<ggml_tensor *> out;
+  out.reserve(pool_.size() * 2);
+  for (const auto &entry : pool_) {
+    out.push_back(entry.entry.K);
+    out.push_back(entry.entry.V);
+  }
+  return out;
 }
 
 void KVCache::set_graph(ggml_cgraph *gf) { gf_ = gf; }
@@ -55,7 +83,7 @@ void KVCache::reset() {
   std::lock_guard<std::mutex> lock(mutex_);
   std::fill(free_.begin(), free_.end(), false);
   for (auto &b : blocks_) {
-    b = {.seq_id = -1, .start_pos = 0, .num_entries = 0};
+    b = {.slot_id = -1, .start_pos = 0, .num_entries = 0};
   }
   usage_table_.clear();
 }
@@ -64,7 +92,7 @@ int KVCache::alloc_block() {
   for (int i = 0; i < (int)free_.size(); i++) {
     if (!free_[i]) {
       free_[i] = true;
-      blocks_[i] = {.seq_id = -1, .start_pos = 0, .num_entries = 0};
+      blocks_[i] = {.slot_id = -1, .start_pos = 0, .num_entries = 0};
       blocks_used_ += 1;
       return i;
     }
@@ -72,45 +100,47 @@ int KVCache::alloc_block() {
   return -1;
 }
 
-void KVCache::ensure_blocks(int seq_id, size_t filled) {
+void KVCache::ensure_blocks(int slot_id, size_t filled) {
   std::lock_guard<std::mutex> lock(mutex_);
-  auto &&it = usage_table_.find(seq_id);
+  auto &&it = usage_table_.find(slot_id);
   if (it == usage_table_.end()) {
-    usage_table_[seq_id] = {.seq_id = seq_id, .seq_len = 0};
+    usage_table_[slot_id] = {.slot_id = slot_id, .seq_len = 0};
   }
-  kv_cache_usage_t &usage = usage_table_[seq_id];
+  kv_cache_usage_t &usage = usage_table_[slot_id];
   size_t needed = (filled + block_size_ - 1) / block_size_;
   while (usage.block_list.size() < needed) {
     int b = alloc_block();
     if (b < 0) {
-      std::cerr << "[debug] ensure_blocks: OUT OF BLOCKS! seq=" << seq_id
-                << " filled=" << filled << " needed=" << needed
-                << " allocated=" << usage.block_list.size() << std::endl;
+      LOG_WRN("ensure_blocks: OUT OF BLOCKS! seq=%d filled=%zu needed=%zu "
+              "allocated=%zu\n",
+              slot_id, filled, needed, usage.block_list.size());
       break;
     }
     usage.block_list.push_back(b);
   }
-  std::cerr << "[debug] ensure_blocks: seq=" << seq_id << " filled=" << filled
-            << " needed=" << needed << " allocated=" << usage.block_list.size()
-            << " free_count=" << blocks_count() - blocks_used_ << std::endl;
+  LOG_DBG("ensure_blocks: seq=%d filled=%zu needed=%zu allocated=%zu "
+          "free_count=%zu\n",
+          slot_id, filled, needed, usage.block_list.size(),
+          blocks_count() - blocks_used_);
 }
 
-void KVCache::free_blocks(int seq_id) {
+void KVCache::free_blocks(int slot_id) {
   std::lock_guard<std::mutex> lock(mutex_);
-  auto it = usage_table_.find(seq_id);
+  auto it = usage_table_.find(slot_id);
   if (it == usage_table_.end()) {
     return;
   }
   for (int b : it->second.block_list) {
     free_[b] = false;
-    blocks_[b] = {.seq_id = -1, .start_pos = 0, .num_entries = 0};
+    blocks_[b] = {.slot_id = -1, .start_pos = 0, .num_entries = 0};
     blocks_used_--;
   }
   usage_table_.erase(it);
 }
 
-std::vector<int32_t> KVCache::get_lookup_rows(int seq_id, size_t filled) const {
-  const auto &blocks = usage_table_.at(seq_id).block_list;
+std::vector<int32_t> KVCache::get_lookup_rows(int slot_id,
+                                              size_t filled) const {
+  const auto &blocks = usage_table_.at(slot_id).block_list;
   std::vector<int32_t> rows(filled);
   for (size_t p = 0; p < filled; p++) {
     rows[p] = blocks[p / block_size_] * block_size_ +
@@ -119,24 +149,23 @@ std::vector<int32_t> KVCache::get_lookup_rows(int seq_id, size_t filled) const {
   return rows;
 }
 
-std::vector<int64_t> KVCache::get_write_rows(int seq_id, size_t past_tokens,
+std::vector<int64_t> KVCache::get_write_rows(int slot_id, size_t past_tokens,
                                              size_t n_tokens) const {
-  const auto &blocks = usage_table_.at(seq_id).block_list;
+  const auto &blocks = usage_table_.at(slot_id).block_list;
   std::vector<int64_t> rows(n_tokens);
-  std::cerr << "[debug] get_write_rows: block_list.size=" << blocks.size()
-            << " blocks_count=" << blocks_count()
-            << " past_tokens=" << past_tokens << " n_tokens=" << n_tokens
-            << std::endl;
+  LOG_DBG("get_write_rows: block_list.size=%zu blocks_count=%zu past_tokens=%zu "
+          "n_tokens=%zu\n",
+          blocks.size(), blocks_count(), past_tokens, n_tokens);
   for (size_t i = 0; i < n_tokens; i++) {
     size_t pos = past_tokens + i;
     size_t logical = pos / block_size_;
     if (logical >= blocks.size()) {
-      std::cerr << "[debug] get_write_rows: OOB logical=" << logical
-                << " >= block_list.size=" << blocks.size() << std::endl;
+      LOG_DBG("get_write_rows: OOB logical=%zu >= block_list.size=%zu\n",
+              logical, blocks.size());
       break;
     }
-    rows[i] = blocks[logical] * block_size_ +
-              static_cast<int>(pos % block_size_);
+    rows[i] =
+        blocks[logical] * block_size_ + static_cast<int>(pos % block_size_);
   }
   return rows;
 }

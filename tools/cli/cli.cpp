@@ -5,9 +5,11 @@
 #include <iostream>
 #include <string>
 #include <vector>
-#include <zinferlm/metrics.h>
 #include <zinferlm/models.h>
 #include <zinferlm/tokenizer.h>
+
+#include "../log_flags.h"
+#include "logging/log.h"
 
 static void sigint_handler(int) {
   std::cout << "\n";
@@ -27,16 +29,18 @@ static std::vector<std::string> split(const std::string &s,
 }
 
 int main(int argc, char *argv[]) {
-  if (argc < 2) {
-    std::cerr << "Usage: " << argv[0] << " <model_path>\n";
+  auto args = zinferlm_tools::parse_log_flags(argc, argv);
+  if (args.empty()) {
+    LOG_ERR("Usage: %s <model_path> %s\n", argv[0],
+            zinferlm_tools::log_flags_usage());
     return 1;
   }
 
-  std::string model_path = argv[1];
+  std::string model_path = args[0];
 
   auto is_loaded = zinferlm::Model::load(model_path.c_str());
   if (!is_loaded) {
-    std::cerr << "Failed to load model: " << model_path << "\n";
+    LOG_ERR("Failed to load model: %s\n", model_path.c_str());
     return 1;
   }
 
@@ -53,8 +57,6 @@ int main(int argc, char *argv[]) {
   std::cout << "Max Context: " << cfg.max_context_len << std::endl;
   std::cout << "Tensors Count: " << tensors.size() << std::endl;
 
-  zinferlm::metrics::LLMMetricsCollector metrics_collector("run-1");
-  metrics_collector.collect();
 
   uint64_t chat_id_counter = 1;
 
@@ -127,6 +129,7 @@ int main(int argc, char *argv[]) {
     // metrics_collector.reset();
   }
 
+  zinferlm::Chat::stop();
   zinferlm::Model::unload();
   return 0;
 }

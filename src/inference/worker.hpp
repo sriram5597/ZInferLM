@@ -24,16 +24,14 @@ struct inference_task_t {
 };
 class InferenceWorker : public Worker<inference_task_t, std::string> {
 private:
+  friend class Engine;
   std::unique_ptr<KVCache> cache_;
   std::unique_ptr<Inference> inference_;
   std::mutex seq_lock_;
   int max_batches_;
   void execute_task_() override;
   InferenceWorker();
-  std::vector<int32_t> tokenize(std::string input);
-
-public:
-  static InferenceWorker &instance();
+  std::vector<int32_t> tokenize(const std::string &task_id, std::string input);
 };
 
 } // namespace internal

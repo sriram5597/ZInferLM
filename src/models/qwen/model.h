@@ -32,7 +32,7 @@ private:
                            int block_id);
 
 public:
-  QwenModel(ModelLoader *f);
+  QwenModel(ModelLoader *f, bool cpu_only = false);
   ggml_tensor *build_graph(ggml_context *ctx, ggml_cgraph *gf,
                            KVCache *cache) override;
   void summary() override;

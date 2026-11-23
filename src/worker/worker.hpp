@@ -5,8 +5,8 @@
 #include <future>
 #include <mutex>
 #include <queue>
-#include <stop_token>
 #include <stdexcept>
+#include <stop_token>
 #include <string>
 #include <thread>
 #include <utility>
@@ -28,35 +28,44 @@ protected:
   int max_workers_ = 1;
   std::stop_source stop_source_;
   std::vector<std::jthread> worker_threads_;
+  std::vector<std::thread::id> worker_thread_ids_;
   std::condition_variable_any cv_;
   std::mutex task_lock_;
   std::queue<std::pair<T, std::promise<R>>> tasks_;
-  std::pair<T, std::promise<R>> get_task_();
   virtual void execute_task_() = 0;
-  Worker();
+  Worker(int max_workers);
 
 public:
   ~Worker();
   void run(std::stop_token tok);
   void add_task(T &task, std::promise<R> result);
   void stop();
+
+  // True when the calling thread is one of this pool's workers. Used by the
+  // engine to refuse a shutdown request that would join itself.
+  bool is_worker_thread() const;
 };
 
-template <typename T, typename R> Worker<T, R>::Worker() {
+template <typename T, typename R>
+Worker<T, R>::Worker(int workers) : max_workers_(workers) {
   worker_threads_.reserve(max_workers_);
+  worker_thread_ids_.reserve(max_workers_);
   std::stop_token tok = stop_source_.get_token();
   for (int i = 0; i < max_workers_; i++) {
     worker_threads_.emplace_back(
         std::jthread([this, tok]() { this->run(tok); }));
+    worker_thread_ids_.push_back(worker_threads_.back().get_id());
   }
 }
 
-template <typename T, typename R>
-std::pair<T, std::promise<R>> Worker<T, R>::get_task_() {
-  std::lock_guard<std::mutex> lock(task_lock_);
-  auto task = std::move(tasks_.front());
-  tasks_.pop();
-  return task;
+template <typename T, typename R> bool Worker<T, R>::is_worker_thread() const {
+  const std::thread::id self = std::this_thread::get_id();
+  for (const auto &id : worker_thread_ids_) {
+    if (id == self) {
+      return true;
+    }
+  }
+  return false;
 }
 
 template <typename T, typename R> void Worker<T, R>::run(std::stop_token tok) {
@@ -94,6 +103,10 @@ template <typename T, typename R> Worker<T, R>::~Worker() { stop(); }
 
 template <typename T, typename R> void Worker<T, R>::stop() {
   stop_source_.request_stop();
+  cv_.notify_all();
+  if (is_worker_thread()) {
+    return; // joining ourselves would deadlock; the owner joins us later
+  }
   for (auto &t : worker_threads_) {
     if (t.joinable()) {
       t.join();

@@ -1,4 +1,5 @@
 #include "samplers.h"
+#include "logging/log.h"
 
 #include <algorithm>
 #include <cmath>
@@ -82,7 +83,7 @@ std::pair<uint64_t, float> Sampler::top_p_sample_(std::span<const float> logits)
     }
   }
   prob_pairs.resize(cutoff_ind);
-  std::cout << "Cutoff size: " << cutoff_ind << std::endl;
+  LOG_DBG("Cutoff size: %zu\n", cutoff_ind);
   std::vector<double> weights(prob_pairs.size());
   for (size_t i = 0; i < weights.size(); i++) {
     weights[i] = static_cast<double>(prob_pairs[i].second / cum);

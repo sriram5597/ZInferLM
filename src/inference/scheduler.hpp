@@ -3,6 +3,7 @@
 #include "models/model_impl.h"
 #include "sampling/samplers.h"
 #include "zinferlm/tokenizer.h"
+#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <future>
@@ -38,6 +39,8 @@ struct seq_info_t {
 
 class InferenceScheduler {
 private:
+  friend class Engine;
+
   std::jthread sched_thread_;
   std::condition_variable_any cv_;
 
@@ -46,8 +49,10 @@ private:
   std::vector<std::optional<seq_info_t>> seq_list_;
   std::vector<int> active_slots_;
   int active_seq_count_;
-  int max_batches_;
+  int max_batches_ = 16;
   uint64_t prefill_chunk_size_;
+  size_t total_tokens_in_batch_;
+  std::atomic<bool> accepting_{true};
 
   std::unique_ptr<KVCache> cache_;
   std::unique_ptr<Inference> runtime_;
@@ -60,13 +65,24 @@ private:
   void build_causal_mask_(model_input_t &input, size_t total_filled);
   void build_input_(int slot_id, model_input_t &inp);
   void complete_sequence_(int slot_id);
-  void init_cache_info_(int slot_id, model_input_t& input);
+  void init_cache_info_(int slot_id, model_input_t &input);
 
 public:
-  static InferenceScheduler &instance();
+  ~InferenceScheduler();
+
   void run(std::stop_token tok);
   void submit(seq_info_t &&info);
+
+  // Stops the scheduler thread and joins it. New submissions are rejected.
   void stop();
+
+  // Fails every active and queued sequence, then releases all state derived
+  // from the model (compute graph, KV cache buffer). Must only run after
+  // stop(), never concurrently with the scheduler thread.
+  void release_state();
+
+  // True when the calling thread is the scheduler thread.
+  bool on_scheduler_thread() const;
 };
 } // namespace internal
 } // namespace zinferlm

@@ -4,8 +4,10 @@
 #include <boost/json/object.hpp>
 #include <boost/json/value.hpp>
 #include <future>
+#include <exception>
 #include <iostream>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "handlers.hpp"
@@ -83,11 +85,10 @@ void chat_completion(Session &session, json::object req_payload) {
   }
 
   auto current_session = session.shared_from_this();
-  auto observer_id = std::make_shared<int>(-1);
+  std::string chat_id = generate_chatcmpl_id();
 
-  zinferlm::events::event_callback_t cb =
-      [current_session,
-       observer_id](zinferlm::events::inference_event_t event) {
+  zinferlm::events::event_callback_t cb = {
+      [current_session, chat_id](zinferlm::events::inference_event_t event) {
         if (auto generated_event =
                 std::get_if<zinferlm::events::token_generated_event_t>(
                     &event)) {
@@ -106,15 +107,16 @@ void chat_completion(Session &session, json::object req_payload) {
           if (status == zinferlm::StreamStatus::EOS) {
             payload = {{"finish_reason", "Stop"}};
           }
+          if (status == zinferlm::StreamStatus::CANCELLED) {
+            payload = {{"finish_reason", "Cancelled"}};
+          }
           current_session->stream_json_message(payload, true);
-          zinferlm::events::EventDispatcher::get_instance().unlisten(
-              *observer_id);
+          zinferlm::events::EventDispatcher::get_instance().unlisten(chat_id);
         }
-      };
+      }};
 
   zinferlm::events::EventDispatcher &dispatcher =
       zinferlm::events::EventDispatcher::get_instance();
-  std::string chat_id = generate_chatcmpl_id();
 
   zinferlm::chat_params_t params = {
       .chat_id = chat_id, .max_tokens = 8192, .temperature = 0.9, .top_p = 0.7};
@@ -124,15 +126,23 @@ void chat_completion(Session &session, json::object req_payload) {
     std::set<zinferlm::events::InferenceEvent> events = {
         zinferlm::events::InferenceEvent::GENERATION_COMPLETED,
         zinferlm::events::InferenceEvent::TOKEN_GENERATED};
-    *observer_id = dispatcher.listen(cb, events);
+    dispatcher.listen(chat_id, cb, events);
   }
 
   zinferlm::Chat chat(zinferlm::Model::instance());
   std::future<std::string> result = chat.invoke(chat_messages, params);
 
   if (!streaming) {
-    std::string output = result.get();
-    current_session->send_json_response(
-        http::status::ok, {{"role", "assistant"}, {"content", output}});
+    try {
+      std::string output = result.get();
+      current_session->send_json_response(
+          http::status::ok, {{"role", "assistant"}, {"content", output}});
+    } catch (const std::exception &e) {
+      // The engine cancels in-flight requests during shutdown; the caller must
+      // see an error response instead of a blocked handler thread.
+      current_session->send_json_response(
+          http::status::service_unavailable,
+          {{"error", std::string("inference cancelled: ") + e.what()}});
+    }
   }
 }

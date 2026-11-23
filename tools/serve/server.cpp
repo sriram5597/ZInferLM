@@ -39,6 +39,7 @@
 #include <vector>
 
 #include "handlers.hpp"
+#include "logging/log.h"
 #include "server.hpp"
 
 namespace beast = boost::beast;
@@ -62,22 +63,22 @@ Listener::Listener(net::io_context &ioc, tcp::endpoint endpoint)
   beast::error_code ec;
   acceptor_.open(endpoint.protocol(), ec);
   if (ec) {
-    std::cout << "Open error: " << ec.message() << std::endl;
+    LOG_ERR("Open error: %s\n", ec.message().c_str());
     return;
   }
   acceptor_.set_option(net::socket_base::reuse_address(true), ec);
   if (ec) {
-    std::cout << "set option error: " << ec.message() << std::endl;
+    LOG_ERR("set option error: %s\n", ec.message().c_str());
     return;
   }
   acceptor_.bind(endpoint, ec);
   if (ec) {
-    std::cout << "Unable to bind server: " << ec.message() << std::endl;
+    LOG_ERR("Unable to bind server: %s\n", ec.message().c_str());
     return;
   }
   acceptor_.listen(net::socket_base::max_listen_connections, ec);
   if (ec) {
-    std::cout << "Listen error: " << ec.message() << std::endl;
+    LOG_ERR("Listen error: %s\n", ec.message().c_str());
     return;
   }
 
@@ -85,11 +86,11 @@ Listener::Listener(net::io_context &ioc, tcp::endpoint endpoint)
   signals_->async_wait([this](const boost::system::error_code &ec,
                               int signal_number) {
     if (!ec) {
-      std::cout << "[Server] Interrupt Received: " << signal_number
-                << "\nInitiating graceful shutdown....\n";
+      LOG_INF("[Server] Interrupt Received: %d\nInitiating graceful shutdown....\n",
+              signal_number);
       stop();
     } else {
-      std::cout << "Error handling interrupts: " << ec.message() << std::endl;
+      LOG_ERR("Error handling interrupts: %s\n", ec.message().c_str());
     }
   });
 }
@@ -100,7 +101,6 @@ void Listener::do_accept() {
         if (ec) {
           return;
         }
-        std::cout << "connection accepted..." << std::endl;
         std::make_shared<Session>(std::move(socket))->run();
         do_accept();
       });
@@ -133,7 +133,7 @@ void Session::do_read_() {
               return;
             }
             if (ec) {
-              std::cerr << "Read Error: " << ec.message() << std::endl;
+              LOG_ERR("Read Error: %s\n", ec.message().c_str());
               return;
             }
             self->handle_request_();
@@ -153,7 +153,6 @@ void Session::handle_request_() {
     return;
   }
 
-  std::cout << "Path: " << req_.target() << std::endl;
   if (req_.method() == http::verb::get && req_.target() == "/health") {
     health_check(*this);
   }
@@ -218,7 +217,7 @@ void Session::send_response_(
         net::bind_executor(
             self->strand_, [self, res](beast::error_code ec, std::size_t) {
               if (ec) {
-                std::cout << "Write Error: " << ec.message() << std::endl;
+                LOG_ERR("Write Error: %s\n", ec.message().c_str());
                 return;
               }
               if (res->keep_alive()) {
@@ -281,8 +280,8 @@ void Session::flush_streaming_queue_() {
         net::bind_executor(strand_, [self = shared_from_this(), res,
                                      sr](beast::error_code ec, std::size_t) {
           if (ec) {
-            std::cerr << "Failed to write to server stream: " << ec.message()
-                      << std::endl;
+            LOG_ERR("Failed to write to server stream: %s\n",
+                    ec.message().c_str());
             self->do_close_();
             return;
           }
@@ -311,8 +310,8 @@ void Session::flush_streaming_queue_() {
       net::bind_executor(strand_, [self = shared_from_this(), current_chunk](
                                       beast::error_code ec, std::size_t) {
         if (ec) {
-          std::cerr << "Client disconnected midstream: " << ec.message()
-                    << std::endl;
+          LOG_DBG("Client disconnected midstream: %s\n",
+                  ec.message().c_str());
           self->is_writing_ = false;
           self->do_close_();
           return;
@@ -346,15 +345,15 @@ void Server::run() {
     for (int i = 0; i < num_threads_ - 1; i++) {
       threads.emplace_back([&ioc] { ioc.run(); });
     }
-    std::cout << "HTTP Server Listening on " << address.to_string() << ":"
-              << port_ << std::endl;
+    LOG_INF("HTTP Server Listening on %s:%d\n", address.to_string().c_str(),
+            (int)port_);
     ioc.run();
     for (auto &t : threads) {
       t.join();
     }
-    std::cout << "Server Stopped with graceful shutdown..." << std::endl;
+    LOG_INF("Server Stopped with graceful shutdown...\n");
     listener_.reset();
   } catch (const std::exception &e) {
-    std::cerr << "Fatal: " << e.what() << std::endl;
+    LOG_ERR("Fatal: %s\n", e.what());
   }
 }
