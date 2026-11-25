@@ -3,6 +3,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <prometheus/family.h>
+#include <prometheus/gauge.h>
+#include <prometheus/metric_type.h>
 #include <unordered_map>
 #include <vector>
 
@@ -34,6 +37,13 @@ struct kv_cache_usage_t {
   int seq_len;
 };
 
+struct cache_metrics_t {
+  prometheus::Family<prometheus::Gauge> *reserved_cache_size;
+  prometheus::Family<prometheus::Gauge> *cache_size_utilized;
+  prometheus::Family<prometheus::Gauge> *total_blocks;
+  prometheus::Family<prometheus::Gauge> *cache_blocks_used;
+};
+
 class KVCache {
 private:
   std::mutex mutex_;
@@ -47,6 +57,7 @@ private:
   size_t size_per_block_ = 0;
   ggml_type dtype_;
   ggml_cgraph *gf_;
+  ggml_backend* backend_;
 
   std::vector<bool> free_;
   std::vector<kv_cache_block_t> blocks_;
@@ -55,8 +66,11 @@ private:
 
   ggml_context_ptr ctx_kv_;
   ggml_backend_buffer_ptr buffer_;
+  cache_metrics_t metrics_;
 
   int alloc_block();
+
+  void init_metrics();
 
 public:
   KVCache(ggml_backend *backend, int ctx_len, int layers, int n_kv, int d_head,

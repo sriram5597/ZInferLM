@@ -1,4 +1,5 @@
 CompileFlags:
+  CompilationDatabase: build-debug
   Add:
     - -isystem
     - /usr/include/c++/15

@@ -4,11 +4,14 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <prometheus/gauge.h>
+#include <prometheus/histogram.h>
 #include <string>
 #include <vector>
 
 #include "engine/engine.h"
 #include "logging/log.h"
+#include "metrics/metrics.hpp"
 #include "scheduler.hpp"
 #include "worker.hpp"
 #include "worker/worker.hpp"
@@ -19,7 +22,20 @@ namespace zinferlm {
 namespace internal {
 
 InferenceWorker::InferenceWorker()
-    : zinferlm::internal::Worker<inference_task_t, std::string>(4) {}
+    : zinferlm::internal::Worker<inference_task_t, std::string>(4) {
+  init_metrics();
+}
+
+void InferenceWorker::init_metrics() {
+  ZinferMetrics &metrics = ZinferMetrics::instance();
+  metrics_.tokenizer_duration =
+      &prometheus::BuildHistogram()
+           .Name("zinfer_worker_tokenizer_duration_seconds")
+           .Help("Duration of tokenizing input tokens in seconds")
+           .Register(metrics.get_registry())
+           .Add({}, prometheus::Histogram::BucketBoundaries{
+                        0.1, 0.25, 0.5, 0.75, 1, 2, 3, 4, 5});
+}
 
 std::vector<int32_t> InferenceWorker::tokenize(const std::string &task_id,
                                                std::string input) {
@@ -45,6 +61,7 @@ std::vector<int32_t> InferenceWorker::tokenize(const std::string &task_id,
 
 void InferenceWorker::execute_task_() {
   std::pair<inference_task_t, std::promise<std::string>> task;
+  int queue_size = 0;
   {
     std::lock_guard<std::mutex> lock(task_lock_);
     if (tasks_.empty()) {
@@ -52,6 +69,7 @@ void InferenceWorker::execute_task_() {
     }
     task = std::move(tasks_.front());
     tasks_.pop();
+    queue_size = tasks_.size();
   }
   LOG_INF("request received: task_id=%s input_chars=%zu max_tokens=%" PRIu64
           "\n",
@@ -60,6 +78,7 @@ void InferenceWorker::execute_task_() {
 
   std::vector<int32_t> tokens;
   try {
+    ScopedObserver observer(*metrics_.tokenizer_duration);
     tokens = tokenize(task.first.task_id, task.first.input);
   } catch (...) {
     // Keep the failure inside the task's future: an exception escaping a

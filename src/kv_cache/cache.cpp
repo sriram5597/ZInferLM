@@ -7,14 +7,17 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <prometheus/gauge.h>
+#include <prometheus/registry.h>
 #include <string>
 #include <utility>
 
 #include "engine/measure.h"
+#include "ggml-backend.h"
 #include "ggml-cpp.h"
 #include "ggml.h"
 #include "logging/log.h"
-#include "zinferlm/models.h"
+#include "metrics/metrics.hpp"
 
 namespace zinferlm {
 namespace internal {
@@ -26,6 +29,8 @@ KVCache::KVCache(ggml_backend *backend, int ctx_len, int layers, int n_kv,
     : max_len_(ctx_len), layers_(layers), d_head_(d_head), n_kv_(n_kv),
       dtype_(type), blocks_used_(0) {
   block_size_ = 16;
+  backend_ = backend;
+  init_metrics();
   size_per_block_ =
       2ull * layers_ * d_head_ * n_kv_ * block_size_ * ggml_type_size(type);
   LOG_INF("Creating kv cache layers=%d, block_size=%d, total_blocks=%zu, "
@@ -37,6 +42,8 @@ KVCache::KVCache(ggml_backend *backend, int ctx_len, int layers, int n_kv,
   blocks_.resize(blocks_count());
   pool_.resize(layers_);
 
+  metrics_.total_blocks->Add({{{"device", ggml_backend_name(backend)}}})
+      .Set(blocks_count());
   size_t ctx_size = 2 * layers_ * ggml_tensor_overhead() + layers_ * 128 + 2;
   ggml_init_params params = {
       .mem_size = ctx_size,
@@ -64,6 +71,9 @@ KVCache::KVCache(ggml_backend *backend, int ctx_len, int layers, int n_kv,
   } else {
     buffer_ = ggml_backend_buffer_ptr{ggml_backend_alloc_ctx_tensors_from_buft(
         ctx_kv_.get(), ggml_backend_get_default_buffer_type(backend))};
+    metrics_.reserved_cache_size
+        ->Add({{{"device", ggml_backend_name(backend)}}})
+        .Set(ggml_backend_buffer_get_size(buffer_.get()));
   }
 }
 
@@ -85,6 +95,12 @@ void KVCache::reset() {
   for (auto &b : blocks_) {
     b = {.slot_id = -1, .start_pos = 0, .num_entries = 0};
   }
+  blocks_used_ = 0;
+  metrics_.cache_blocks_used->Add({{"device", ggml_backend_name(backend_)}})
+      .Set(blocks_used_);
+  metrics_.cache_size_utilized->Add({{"device", ggml_backend_name(backend_)}})
+      .Set(blocks_used_ * size_per_block_);
+
   usage_table_.clear();
 }
 
@@ -94,6 +110,11 @@ int KVCache::alloc_block() {
       free_[i] = true;
       blocks_[i] = {.slot_id = -1, .start_pos = 0, .num_entries = 0};
       blocks_used_ += 1;
+      metrics_.cache_blocks_used->Add({{"device", ggml_backend_name(backend_)}})
+          .Increment();
+      metrics_.cache_size_utilized
+          ->Add({{"device", ggml_backend_name(backend_)}})
+          .Set(blocks_used_ * size_per_block_);
       return i;
     }
   }
@@ -135,6 +156,10 @@ void KVCache::free_blocks(int slot_id) {
     blocks_[b] = {.slot_id = -1, .start_pos = 0, .num_entries = 0};
     blocks_used_--;
   }
+  metrics_.cache_blocks_used->Add({{"device", ggml_backend_name(backend_)}})
+      .Set(blocks_used_);
+  metrics_.cache_size_utilized->Add({{"device", ggml_backend_name(backend_)}})
+      .Set(blocks_used_ * size_per_block_);
   usage_table_.erase(it);
 }
 
@@ -153,9 +178,10 @@ std::vector<int64_t> KVCache::get_write_rows(int slot_id, size_t past_tokens,
                                              size_t n_tokens) const {
   const auto &blocks = usage_table_.at(slot_id).block_list;
   std::vector<int64_t> rows(n_tokens);
-  LOG_DBG("get_write_rows: block_list.size=%zu blocks_count=%zu past_tokens=%zu "
-          "n_tokens=%zu\n",
-          blocks.size(), blocks_count(), past_tokens, n_tokens);
+  LOG_DBG(
+      "get_write_rows: block_list.size=%zu blocks_count=%zu past_tokens=%zu "
+      "n_tokens=%zu\n",
+      blocks.size(), blocks_count(), past_tokens, n_tokens);
   for (size_t i = 0; i < n_tokens; i++) {
     size_t pos = past_tokens + i;
     size_t logical = pos / block_size_;
@@ -209,6 +235,29 @@ KVCache::get_slice(ggml_context *graph_ctx, int l, ggml_tensor *lookup_rows) {
                          ggml_row_size(V_slice->type, d_head_ * n_kv_),
                          ggml_row_size(V_slice->type, d_head_), 0);
   return std::make_pair(K_slice, V_slice);
+}
+
+void KVCache::init_metrics() {
+  prometheus::Registry &registry = ZinferMetrics::instance().get_registry();
+  metrics_.reserved_cache_size =
+      &prometheus::BuildGauge()
+           .Name("zinfer_kv_cache_reserved_size_bytes")
+           .Help("measures the total reserved memory size for kv cache")
+           .Register(registry);
+  metrics_.cache_size_utilized =
+      &prometheus::BuildGauge()
+           .Name("zinfer_kv_cache_memory_utilized_bytes")
+           .Help("measures kv cache memory utilized in bytes")
+           .Register(registry);
+  metrics_.cache_blocks_used =
+      &prometheus::BuildGauge()
+           .Name("zinfer_kv_cache_blocks_used")
+           .Help("measures number of kv cache blocks used")
+           .Register(registry);
+  metrics_.total_blocks = &prometheus::BuildGauge()
+                               .Name("zinfer_kv_cache_blocks_total")
+                               .Help("measures total number of kv cache blocks")
+                               .Register(registry);
 }
 
 } // namespace internal

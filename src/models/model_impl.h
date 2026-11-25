@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <memory>
+#include <prometheus/family.h>
+#include <prometheus/gauge.h>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -18,6 +20,10 @@ namespace zinferlm {
 namespace internal {
 
 class KVCache;
+
+struct model_metrics_t {
+  prometheus::Family<prometheus::Gauge> *model_size;
+};
 
 struct model_input_t {
   std::vector<int32_t> tokens;
@@ -79,8 +85,11 @@ protected:
   std::vector<ggml_backend_ptr> backends_;
   std::vector<ggml_tensor *> input_tensors_;
   uint64_t model_size_ = 0;
+  model_metrics_t metrics_;
+
   void build_mask(std::vector<ggml_fp16_t> &mask, const int filled,
                   const int size);
+  void init_metrics();
 
 private:
   ggml_backend_buffer_ptr tensor_buffer_;

@@ -4,11 +4,16 @@
 #include "sampling/samplers.h"
 #include "zinferlm/tokenizer.h"
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <future>
 #include <mutex>
 #include <optional>
+#include <prometheus/counter.h>
+#include <prometheus/family.h>
+#include <prometheus/gauge.h>
+#include <prometheus/histogram.h>
 #include <queue>
 #include <string>
 #include <thread>
@@ -35,6 +40,19 @@ struct seq_info_t {
   std::vector<int32_t> inp_tokens;
   std::vector<int32_t> out_tokens;
   std::string out_str;
+  std::chrono::steady_clock::time_point scheduled_time;
+  std::chrono::steady_clock::time_point last_token_time;
+};
+
+struct scheduler_metrics_t {
+  prometheus::Family<prometheus::Counter> *total_input_tokens;
+  prometheus::Family<prometheus::Counter> *total_tokens_generated;
+  prometheus::Histogram *ttft;
+  prometheus::Histogram *itl;
+  prometheus::Histogram* request_duration;
+  prometheus::Family<prometheus::Counter> *total_requests;
+  prometheus::Family<prometheus::Gauge> *active_sequence;
+  prometheus::Family<prometheus::Gauge> *pending_requests;
 };
 
 class InferenceScheduler {
@@ -57,6 +75,7 @@ private:
   std::unique_ptr<KVCache> cache_;
   std::unique_ptr<Inference> runtime_;
   Tokenizer tokenizer_;
+  scheduler_metrics_t metrics_{};
 
   explicit InferenceScheduler();
 
@@ -66,6 +85,7 @@ private:
   void build_input_(int slot_id, model_input_t &inp);
   void complete_sequence_(int slot_id);
   void init_cache_info_(int slot_id, model_input_t &input);
+  void init_metrics();
 
 public:
   ~InferenceScheduler();

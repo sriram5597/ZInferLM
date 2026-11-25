@@ -3,6 +3,8 @@
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <prometheus/gauge.h>
+#include <prometheus/info.h>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -20,15 +22,13 @@
 #include "inference.h"
 #include "kv_cache/cache.h"
 #include "logging/log.h"
+#include "metrics/metrics.hpp"
 #include "models/model_impl.h"
 #include "sampling/samplers.h"
 #include "zinferlm/config.hpp"
 
 namespace zinferlm {
 namespace internal {
-
-using zinferlm::events::EventDispatcher;
-using zinferlm::events::InferenceEvent;
 
 Inference::Inference(KVCache *cache, zinferlm::Model &model, int max_batches,
                      uint32_t chunk_size, bool measure_only)
@@ -42,6 +42,7 @@ Inference::Inference(KVCache *cache, ModelImpl &model_impl, int max_batches,
   auto backend_ptrs = model_impl_.backends();
   sched_ = ggml_backend_sched_ptr{ggml_backend_sched_new(
       backend_ptrs.data(), nullptr, backend_ptrs.size(), 16384, false, true)};
+  init_metrics();
   reserve_memory();
 }
 
@@ -69,6 +70,11 @@ bool Inference::reserve_memory() {
   ggml_tensor *aggregated_out = ggml_get_rows(mctx, out, out_rows);
 
   ggml_build_forward_expand(mgf, aggregated_out);
+
+  metrics_.max_ctx->Add({}).Set(max_ctx);
+  metrics_.max_output_tokens->Add({}).Set(max_tokens);
+  metrics_.max_batches->Add({}).Set(max_batches_);
+  metrics_.prefill_chunk_size->Add({}).Set(prefill_chunksize_);
 
   if (!measure_only_) {
     for (ggml_tensor *t : model_impl_.get_input_tensors()) {
@@ -106,6 +112,9 @@ bool Inference::reserve_memory() {
       for (size_t i = 0; i < backends.size(); i++) {
         backend_sizes_[i] =
             ggml_backend_sched_get_buffer_size(sched_.get(), backends[i]);
+        metrics_.reserved_memory_size
+            ->Add({{"backend", ggml_backend_name(backends[i])}})
+            .Set(backend_sizes_[i]);
       }
     }
   }
@@ -230,6 +239,33 @@ Inference::predict(const model_input_t &input, size_t n_tokens,
                           aggregated_out->ne[0] * aggregated_out->ne[1] *
                               ggml_type_size(aggregated_out->type));
   return std::make_pair(logits, aggregated_out->ne[0]);
+}
+
+void Inference::init_metrics() {
+  ZinferMetrics &metrics = ZinferMetrics::instance();
+  metrics_.reserved_memory_size =
+      &prometheus::BuildGauge()
+           .Name("zinfer_runtime_reserved_memeory_bytes")
+           .Help("Reserved memory for running computation in bytes")
+           .Register(metrics.get_registry());
+  metrics_.max_ctx = &prometheus::BuildGauge()
+                          .Name("zinfer_runtime_max_ctx")
+                          .Help("Maximum Context the computation can handle")
+                          .Register(metrics.get_registry());
+  metrics_.max_output_tokens =
+      &prometheus::BuildGauge()
+           .Name("zinfer_runtime_max_output_tokens")
+           .Help("Maximum tokens the computation can generate per prompt")
+           .Register(metrics.get_registry());
+  metrics_.max_batches =
+      &prometheus::BuildGauge()
+           .Name("zinfer_runtime_max_batches")
+           .Help("Maximum batches the computation can handle")
+           .Register(metrics.get_registry());
+  metrics_.prefill_chunk_size = &prometheus::BuildGauge()
+                              .Name("zinfer_runtime_prefill_chunk_size")
+                              .Help("Prefill chunk size")
+                              .Register(metrics.get_registry());
 }
 } // namespace internal
 } // namespace zinferlm

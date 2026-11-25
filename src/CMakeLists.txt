@@ -20,7 +20,7 @@ add_library(zinferlm SHARED
     ./kv_cache/cache.h ./kv_cache/cache.cpp
     ./chat/chat_message.h ./chat/chat_message.cpp
     ./chat/chat.cpp 
-    # ./metrics/metrics.cpp
+    ./metrics/metrics.cpp
     ./events/events.cpp
     ./logging/log.h ./logging/log.cpp
     ./sampling/samplers.h ./sampling/samplers.cpp 
@@ -40,7 +40,7 @@ target_sources(zinferlm
       ${CMAKE_SOURCE_DIR}/include/zinferlm/chat.h
       ${CMAKE_SOURCE_DIR}/include/zinferlm/events.h
       ${CMAKE_SOURCE_DIR}/include/zinferlm/config.hpp
-      # ${CMAKE_SOURCE_DIR}/include/zinferlm/metrics.h
+      ${CMAKE_SOURCE_DIR}/include/zinferlm/metrics.hpp
 )
 
 
@@ -62,29 +62,6 @@ if (NOT PCRE2_FOUND)
                         "  Windows:      vcpkg install pcre2")
 endif()
 
-set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-set(MINJA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(MINJA_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
-set(MINJA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(MINJA_TEST_ENABLED OFF CACHE BOOL "" FORCE)
-include(FetchContent)
-
-FetchContent_Declare(
-  json
-  GIT_REPOSITORY https://github.com/nlohmann/json
-  GIT_TAG v3.12.0
-)
-FetchContent_MakeAvailable(json)
-
-
-FetchContent_Declare(
-  minja
-  GIT_REPOSITORY https://github.com/google/minja
-  GIT_TAG main
-)
-FetchContent_MakeAvailable(minja)
-
-
 target_include_directories(zinferlm
   PUBLIC
     ${CMAKE_SOURCE_DIR}/src
@@ -93,9 +70,32 @@ target_include_directories(zinferlm
     ${PCRE2_INCLUDE_DIRS}
 )
 
+# Dependencies are targets provided by cmake/deps.cmake (included at the top
+# level, before this directory). Fall back to a system install where upstream
+# actually ships a CMake package.
+if(NOT TARGET nlohmann_json::nlohmann_json)
+  find_package(nlohmann_json CONFIG REQUIRED)
+endif()
+if(NOT TARGET minja)
+  message(FATAL_ERROR
+    "Target 'minja' is not defined. It is provided by cmake/deps.cmake, which "
+    "must be included before add_subdirectory(src).")
+endif()
+
+if (NOT TARGET prometheus-cpp::core)
+  find_package(prometheus-cpp CONFIG REQUIRED)
+endif()
+
 find_package(Threads REQUIRED)
 
-target_link_libraries(zinferlm PRIVATE ${PCRE2_LIBRARIES} minja ggml Threads::Threads)
+target_link_libraries(zinferlm PRIVATE
+  ${PCRE2_LIBRARIES}
+  nlohmann_json::nlohmann_json
+  minja
+  ggml
+  Threads::Threads
+  prometheus-cpp::core
+)
 
 if (TARGET ggml-cuda)
   set(CMAKE_CUDA_HOST_COMPILER "/usr/bin/g++-14" CACHE FILEPATH "Host compiler for NVCC" FORCE)

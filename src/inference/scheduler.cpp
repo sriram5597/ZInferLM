@@ -2,6 +2,7 @@
 #include "ggml.h"
 #include "kv_cache/cache.h"
 #include "logging/log.h"
+#include "metrics/metrics.hpp"
 #include "sampling/samplers.h"
 #include "worker/worker.hpp"
 #include "zinferlm/config.hpp"
@@ -55,6 +56,7 @@ InferenceScheduler::InferenceScheduler() {
   active_seq_count_ = 0;
   total_tokens_in_batch_ = 0;
   seq_list_.resize(max_batches_);
+  init_metrics();
   sched_thread_ = std::jthread([this](std::stop_token tok) { this->run(tok); });
   tokenizer_ = Tokenizer::for_model(zinferlm::Model::instance());
 }
@@ -158,9 +160,11 @@ void InferenceScheduler::schedule_sequence_() {
     }
     seq_list_[slot_id] = std::move(pending_queue_.front());
     seq_list_[slot_id]->status = SeqStatus::PREFILL;
+    seq_list_[slot_id]->scheduled_time = std::chrono::steady_clock::now();
     pending_queue_.pop();
     ++active_seq_count_;
     ++admitted;
+    metrics_.active_sequence->Add({}).Set(active_seq_count_);
     LOG_INF("sequence scheduled: seq_id=%s slot=%d (PREFILL)\n",
             seq_list_[slot_id]->seq_id.c_str(), slot_id);
   }
@@ -168,6 +172,7 @@ void InferenceScheduler::schedule_sequence_() {
     LOG_DBG("admission done: admitted=%d active=%d/%d pending=%zu\n", admitted,
             active_seq_count_, max_batches_, pending_queue_.size());
   }
+  metrics_.pending_requests->Add({}).Set(pending_queue_.size());
 }
 
 void InferenceScheduler::build_causal_mask_(model_input_t &input,
@@ -198,7 +203,6 @@ void InferenceScheduler::build_input_(int slot_id, model_input_t &input) {
   seq_info_t &info = seq_list_[slot_id].value();
   const size_t len = info.inp_tokens.size();
   if (info.past_tokens < len) {
-    info.status = SeqStatus::PREFILL;
     const size_t remaining = len - info.past_tokens;
     const size_t chunk_size = std::min(prefill_chunk_size_, remaining);
     input.tokens.insert(
@@ -211,12 +215,6 @@ void InferenceScheduler::build_input_(int slot_id, model_input_t &input) {
       input.positions.push_back(info.past_tokens + i);
     }
   } else {
-    if (info.status != SeqStatus::DECODE) {
-      LOG_INF("prefill completed: seq_id=%s prompt_tokens=%zu, entering "
-              "DECODE\n",
-              info.seq_id.c_str(), len);
-    }
-    info.status = SeqStatus::DECODE;
     input.tokens.push_back(info.out_tokens.back());
     input.positions.push_back(info.past_tokens);
     info.seq_len = 1;
@@ -236,11 +234,17 @@ void InferenceScheduler::complete_sequence_(int slot_id) {
       "sequence finished: seq_id=%s slot=%d output_chars=%zu active=%d/%d\n",
       info.seq_id.c_str(), slot_id, info.out_str.size(), active_seq_count_ - 1,
       max_batches_);
+
+  metrics_.request_duration->Observe(
+      std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                    info.scheduled_time)
+          .count());
   total_tokens_in_batch_ -= info.past_tokens;
   info.promise.set_value(info.out_str);
   seq_list_[slot_id] = std::nullopt;
   --active_seq_count_;
   auto it = std::find(active_slots_.begin(), active_slots_.end(), slot_id);
+  cache_->free_blocks(slot_id);
   if (it != active_slots_.end()) {
     active_slots_.erase(it);
   }
@@ -300,6 +304,7 @@ void InferenceScheduler::step_() {
   LOG_DBG("step compute: tokens=%zu elapsed_ms=%.2f\n", total_tokens,
           elapsed.count());
   std::vector<int> finished_slots;
+  std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
   for (size_t i = 0; i < active_slots_.size(); i++) {
     int slot_id = active_slots_[i];
     auto &current_seq = seq_list_[slot_id];
@@ -328,11 +333,29 @@ void InferenceScheduler::step_() {
               .status = status, .num_tokens = current_seq->past_tokens});
       finished_slots.push_back(slot_id);
     } else if (current_seq->past_tokens >= current_seq->inp_tokens.size()) {
+      if (current_seq->status != SeqStatus::DECODE) {
+        current_seq->status = SeqStatus::DECODE;
+        current_seq->last_token_time = std::chrono::steady_clock::now();
+        metrics_.ttft->Observe(
+            std::chrono::duration<double>(current_seq->last_token_time -
+                                          current_seq->scheduled_time)
+                .count());
+        LOG_INF("prefill completed: seq_id=%s prompt_tokens=%zu, entering "
+                "DECODE\n",
+                current_seq->seq_id.c_str(), current_seq->inp_tokens.size());
+      } else {
+        metrics_.itl->Observe(
+            std::chrono::duration<double>(now - current_seq->last_token_time)
+                .count());
+        current_seq->last_token_time = now;
+      }
+
       dispatcher.dispatch(
           current_seq->seq_id, events::InferenceEvent::TOKEN_GENERATED,
           events::token_generated_event_t{.seq_id = current_seq->seq_id,
                                           .token = token,
                                           .pos = current_seq->past_tokens - 1});
+      metrics_.total_tokens_generated->Add({}).Increment();
       current_seq->out_tokens.push_back(sample.first);
       current_seq->out_str += token;
     }
@@ -352,6 +375,9 @@ void InferenceScheduler::submit(seq_info_t &&seq) {
       LOG_INF("sequence queued: seq_id=%s prompt_tokens=%zu\n",
               seq.seq_id.c_str(), seq.inp_tokens.size());
       pending_queue_.push(std::move(seq));
+      metrics_.total_requests->Add({}).Increment();
+      metrics_.total_input_tokens->Add({}).Increment(seq.inp_tokens.size());
+      metrics_.pending_requests->Add({}).Set(pending_queue_.size());
     }
   }
   if (rejected.has_value()) {
@@ -360,7 +386,76 @@ void InferenceScheduler::submit(seq_info_t &&seq) {
         std::make_exception_ptr(worker_stopped("engine is shutting down")));
     return;
   }
+
   cv_.notify_one();
+}
+
+namespace {
+// TTFT: queueing + prefill up to the first generated token.
+const prometheus::Histogram::BucketBoundaries kTtftBuckets{
+    0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0};
+
+// Prefill duration: long prompts can take tens of seconds.
+const prometheus::Histogram::BucketBoundaries kPrefillBuckets{
+    0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0};
+
+// Inter-token latency: milliseconds per decoded token.
+const prometheus::Histogram::BucketBoundaries kItlBuckets{
+    0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0};
+} // namespace
+
+void InferenceScheduler::init_metrics() {
+  ZinferMetrics &metrics = ZinferMetrics::instance();
+  prometheus::Registry &registry = metrics.get_registry();
+
+  metrics_.total_input_tokens =
+      &prometheus::BuildCounter()
+           .Name("zinfer_scheduler_input_tokens_total")
+           .Help("Total prompt tokens accepted from the worker")
+           .Register(registry);
+  metrics_.total_tokens_generated =
+      &prometheus::BuildCounter()
+           .Name("zinfer_scheduler_generated_tokens_total")
+           .Help("Total tokens generated across all sequences")
+           .Register(registry);
+  metrics_.total_requests =
+      &prometheus::BuildCounter()
+           .Name("zinfer_scheduler_requests_total")
+           .Help("Total inference requests submitted to the scheduler")
+           .Register(registry);
+
+  metrics_.active_sequence =
+      &prometheus::BuildGauge()
+           .Name("zinfer_scheduler_active_sequences")
+           .Help("Sequences currently in prefill or decode")
+           .Register(registry);
+  metrics_.pending_requests =
+      &prometheus::BuildGauge()
+           .Name("zinfer_scheduler_pending_requests")
+           .Help("Sequences queued and waiting for a batch slot")
+           .Register(registry);
+
+  metrics_.ttft =
+      &prometheus::BuildHistogram()
+           .Name("zinfer_scheduler_ttft_seconds")
+           .Help("Time from submission to first generated token, in "
+                 "seconds")
+           .Register(registry)
+           .Add({}, kTtftBuckets);
+
+  metrics_.request_duration =
+      &prometheus::BuildHistogram()
+           .Name("zinfer_scheduler_request_duration_seconds")
+           .Help("Time spent in for each request end-to-end, in seconds")
+           .Register(registry)
+           .Add({}, kPrefillBuckets);
+
+  metrics_.itl = &prometheus::BuildHistogram()
+                      .Name("zinfer_scheduler_itl_seconds")
+                      .Help("Inter-token latency between consecutive decoded "
+                            "tokens, in seconds")
+                      .Register(registry)
+                      .Add({}, kItlBuckets);
 }
 } // namespace internal
 } // namespace zinferlm

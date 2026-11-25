@@ -14,3 +14,5 @@ struct handler_response {
 
 void health_check(Session &session);
 void chat_completion(Session &session, json::object payload);
+
+void scrape_metrics(Session& session);

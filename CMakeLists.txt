@@ -30,6 +30,17 @@ endif()
 set(GGML_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GGML_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 
+# Default to a configured build type; minja's CMake otherwise force-sets one in
+# the global cache, and an empty build type silently disables optimisation.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
+    "Debug" "Release" "RelWithDebInfo" "MinSizeRel")
+endif()
+
+# All third-party acquisition lives here; must stay above any consumer.
+include(cmake/deps.cmake)
+
 add_subdirectory(ggml)
 add_subdirectory(src)
 

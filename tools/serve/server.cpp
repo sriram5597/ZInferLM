@@ -86,8 +86,9 @@ Listener::Listener(net::io_context &ioc, tcp::endpoint endpoint)
   signals_->async_wait([this](const boost::system::error_code &ec,
                               int signal_number) {
     if (!ec) {
-      LOG_INF("[Server] Interrupt Received: %d\nInitiating graceful shutdown....\n",
-              signal_number);
+      LOG_INF(
+          "[Server] Interrupt Received: %d\nInitiating graceful shutdown....\n",
+          signal_number);
       stop();
     } else {
       LOG_ERR("Error handling interrupts: %s\n", ec.message().c_str());
@@ -96,14 +97,13 @@ Listener::Listener(net::io_context &ioc, tcp::endpoint endpoint)
 }
 
 void Listener::do_accept() {
-  acceptor_.async_accept(
-      [this](beast::error_code ec, tcp::socket socket) {
-        if (ec) {
-          return;
-        }
-        std::make_shared<Session>(std::move(socket))->run();
-        do_accept();
-      });
+  acceptor_.async_accept([this](beast::error_code ec, tcp::socket socket) {
+    if (ec) {
+      return;
+    }
+    std::make_shared<Session>(std::move(socket))->run();
+    do_accept();
+  });
 }
 
 void Listener::run() { do_accept(); }
@@ -153,8 +153,13 @@ void Session::handle_request_() {
     return;
   }
 
-  if (req_.method() == http::verb::get && req_.target() == "/health") {
-    health_check(*this);
+  if (req_.method() == http::verb::get) {
+    if (req_.target() == "/health") {
+      health_check(*this);
+    }
+    if (req_.target() == "/metrics") {
+      scrape_metrics(*this);
+    }
   }
   if (req_.method() == http::verb::post) {
     auto content_type = req_[http::field::content_type];
@@ -183,6 +188,17 @@ void Session::send_json_response(http::status status, json::value payload) {
   res->set(http::field::content_type, "application/json");
   res->keep_alive(req_.keep_alive());
   res->body() = json::serialize(payload);
+  res->prepare_payload();
+  send_response_(res);
+}
+
+void Session::send_text_response(http::status status, std::string payload) {
+  auto res = std::make_shared<http::response<http::string_body>>(
+      http::status::ok, req_.version());
+  res->set(http::field::server, "Boost.Beast Server");
+  res->set(http::field::content_type, "text/plain");
+  res->keep_alive(req_.keep_alive());
+  res->body() = payload;
   res->prepare_payload();
   send_response_(res);
 }
@@ -310,8 +326,7 @@ void Session::flush_streaming_queue_() {
       net::bind_executor(strand_, [self = shared_from_this(), current_chunk](
                                       beast::error_code ec, std::size_t) {
         if (ec) {
-          LOG_DBG("Client disconnected midstream: %s\n",
-                  ec.message().c_str());
+          LOG_DBG("Client disconnected midstream: %s\n", ec.message().c_str());
           self->is_writing_ = false;
           self->do_close_();
           return;

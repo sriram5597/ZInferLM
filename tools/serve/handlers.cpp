@@ -3,8 +3,8 @@
 #include <boost/json.hpp>
 #include <boost/json/object.hpp>
 #include <boost/json/value.hpp>
-#include <future>
 #include <exception>
+#include <future>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -14,6 +14,7 @@
 #include "server.hpp"
 #include "zinferlm/chat.h"
 #include "zinferlm/events.h"
+#include "zinferlm/metrics.hpp"
 #include "zinferlm/models.h"
 
 namespace json = boost::json;
@@ -22,6 +23,10 @@ namespace http = boost::beast::http;
 void health_check(Session &session) {
   json::object obj = {{"status", "healthy"}};
   session.send_json_response(http::status::ok, obj);
+}
+
+void scrape_metrics(Session &session) {
+  session.send_text_response(http::status::ok, zinferlm::get_metrics());
 }
 
 std::string generate_chatcmpl_id(size_t length = 29) {

@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <prometheus/gauge.h>
 #include <string>
 #include <vector>
 
@@ -16,6 +17,7 @@
 #include "engine/measure.h"
 #include "engine/tensors.h"
 #include "logging/log.h"
+#include "metrics/metrics.hpp"
 #include "model_impl.h"
 
 namespace zinferlm {
@@ -31,6 +33,7 @@ ModelImpl::ModelImpl(ModelLoader *loader, bool cpu_only)
 
   ggml_backend_ptr cpu_backend = ggml_backend_ptr{ggml_backend_cpu_init()};
   backends_.push_back(std::move(cpu_backend));
+  init_metrics();
 #if defined(CUDA_ENABLED) && CUDA_ENABLED
   if (!cpu_only_ && get_backend_type() == GGML_BACKEND_DEVICE_TYPE_GPU) {
     LOG_INF("Using cuda backend..\n");
@@ -48,8 +51,7 @@ ModelImpl::~ModelImpl() = default;
 
 bool ModelImpl::use_gpu() const {
 #if defined(CUDA_ENABLED) && CUDA_ENABLED
-  return !cpu_only_ &&
-         get_backend_type() == GGML_BACKEND_DEVICE_TYPE_GPU;
+  return !cpu_only_ && get_backend_type() == GGML_BACKEND_DEVICE_TYPE_GPU;
 #else
   return false;
 #endif
@@ -94,6 +96,7 @@ void ModelImpl::create_tensor_structs() {
     tensor_map_[t_info.name] = t;
     model_size_ += ggml_nbytes(t);
   }
+  metrics_.model_size->Add({}).Set(model_size_);
 }
 
 void ModelImpl::mark_tensors_external() {
@@ -198,6 +201,15 @@ std::vector<zinferlm::tensor_info_t> ModelImpl::tensor_info() const {
 
 zinferlm::model_config_t ModelImpl::config() const {
   return loader_->model_config();
+}
+
+void ModelImpl::init_metrics() {
+  ZinferMetrics &metrics = ZinferMetrics::instance();
+  metrics_.model_size =
+      &prometheus::BuildGauge()
+           .Name("zinfer_model_size_bytes")
+           .Help("Measures size of all the tensors in model in bytes")
+           .Register(metrics.get_registry());
 }
 
 } // namespace internal

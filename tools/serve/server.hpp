@@ -47,6 +47,7 @@ public:
       : stream_(std::move(socket)),
         strand_(net::make_strand(stream_.socket().get_executor())) {}
   void send_json_response(http::status status, json::value payload);
+  void send_text_response(http::status statuc, std::string body);
   void initiate_streaming();
   void stream_json_message(json::value payload, bool is_end);
   void run();

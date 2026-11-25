@@ -3,6 +3,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <prometheus/family.h>
+#include <prometheus/gauge.h>
+#include <prometheus/info.h>
 #include <string>
 #include <utility>
 #include <vector>
@@ -19,6 +22,14 @@
 
 namespace zinferlm {
 namespace internal {
+
+struct runtime_metrics_t {
+  prometheus::Family<prometheus::Gauge> *reserved_memory_size;
+  prometheus::Family<prometheus::Gauge> *max_ctx;
+  prometheus::Family<prometheus::Gauge> *max_output_tokens;
+  prometheus::Family<prometheus::Gauge> *max_batches;
+  prometheus::Family<prometheus::Gauge> *prefill_chunk_size;
+};
 
 class Inference {
 private:
@@ -44,12 +55,15 @@ private:
   bool debug_ = false;
   DebugCallbackData debug_cb_data_;
 
+  runtime_metrics_t metrics_;
+
   ggml_context *init_context(uint64_t op_estimate);
   ggml_cgraph *new_graph(size_t n_tokens, size_t total_filled);
   void set_output(ggml_tensor *out);
-  bool prepare(ggml_tensor* additional_input);
+  bool prepare(ggml_tensor *additional_input);
   void compute(const model_input_t &input);
   bool reserve_memory();
+  void init_metrics();
 
 public:
   explicit Inference(KVCache *cache, zinferlm::Model &model,
